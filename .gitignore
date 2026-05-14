@@ -1,0 +1,26 @@
+# Julia
+.julia/
+*.ji
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Build
+build/
+dist/
+*.so
+*.dll
+*.dylib
+*.o
+
+# Benchmark outputs
+results/*.jsonl
+results/*.json
+logs/*.log
+
+# System
+.DS_Store
+.vscode/settings.json
