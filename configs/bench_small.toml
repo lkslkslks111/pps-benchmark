@@ -1,0 +1,17 @@
+name = "bench_small"
+seed = 1
+
+[task]
+task_id = "small_clifford_rotation_n4_l4_seed1"
+family = "clifford_pauli_rotation"
+nqubits = 4
+nlayers = 4
+observable = "Z0"
+
+[truncation]
+method = "threshold"
+threshold = 1.0e-8
+
+[reference]
+enabled = true
+method = "exact_small"
