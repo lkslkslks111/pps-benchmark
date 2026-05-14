@@ -1,0 +1,13 @@
+name = "PPSBench"
+uuid = "11111111-1111-1111-1111-111111111111"
+authors = ["li kunsheng"]
+version = "0.1.0"
+
+[deps]
+BenchmarkTools = "6e4b80f9-dda5-5f1d-9040-6f6dca8c77f0"
+JSON3 = "0f8b85d8-7281-11e9-16c2-39e9d4cc0d20"
+StructTypes = "856f2bd8-1eba-4b0a-8007-ebc267875bd4"
+TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
+
+[compat]
+julia = "1.10"
