@@ -53,7 +53,8 @@ Every task must follow:
 - wrappers/ contains Python, C++, and CUDA runners.
 - results/ contains generated benchmark outputs.
 - logs/ contains raw execution logs.
-- test/ contains Julia tests.
+- Temporary task tests must be generated under `/tmp` and removed when the task finishes.
+- Temporary benchmark outputs must be generated under `/tmp`, `results/tmp/`, or `logs/tmp/` and cleaned before handoff.
 - docs/ contains protocol and reproducibility notes.
 
 ## Required Benchmark Result Fields
@@ -77,7 +78,8 @@ Before committing, run:
 
 ```bash
 make test
-make smokeCoding Rules
+make smoke
+```
 
 ## Coding Rules
 
@@ -86,3 +88,4 @@ Keep backend-specific logic isolated.
 Do not optimize before correctness tests pass.
 Every wrapper must fail loudly and return structured error information.
 Use deterministic random seeds for benchmark tasks.
+Do not leave issue-specific test files or generated benchmark results in the repository after the task is complete.
