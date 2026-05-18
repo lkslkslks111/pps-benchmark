@@ -1,6 +1,6 @@
 JULIA = julia --project=.
 
-.PHONY: instantiate test smoke smoke-eagle bench-small clean
+.PHONY: instantiate test smoke smoke-eagle reproduce-rudolph-eagle bench-small clean
 
 instantiate:
 	$(JULIA) -e 'using Pkg; Pkg.instantiate()'
@@ -68,6 +68,41 @@ test:
 		'@assert eagle_result.metadata["circuit_schema_version"] == "pps-circuit-v1"' \
 		'@assert eagle_result.metadata["family"] == "ibm_eagle_tfi"' \
 		'@assert eagle_result.metadata["nqubits"] == 127' \
+		'rudolph_spec = load_benchmark_spec("configs/reproduce_rudolph_eagle_127.toml")' \
+		'@assert rudolph_spec.family == "rudolph_eagle_127"' \
+		'@assert rudolph_spec.nqubits == 127' \
+		'@assert rudolph_spec.nlayers == 20' \
+		'@assert rudolph_spec.observable == "Z62"' \
+		'rudolph_circuit = export_circuit(rudolph_spec)' \
+		'@assert rudolph_circuit.family == "rudolph_eagle_127"' \
+		'@assert rudolph_circuit.metadata["topology"] == "ibm_eagle"' \
+		'@assert rudolph_circuit.metadata["observable_julia_index"] == 63' \
+		'@assert length(rudolph_circuit.gates) == 5420' \
+		'@assert count(gate -> gate.paulis == ["Z", "Z"], rudolph_circuit.gates) == 2880' \
+		'@assert count(gate -> gate.paulis == ["X"], rudolph_circuit.gates) == 2540' \
+		'@assert count(gate -> gate.paulis == ["Z", "Z"] && isapprox(gate.theta, -pi / 2; atol=0.0, rtol=0.0), rudolph_circuit.gates) == 2880' \
+		'@assert all(0 <= q < 127 for gate in rudolph_circuit.gates for q in gate.qubits)' \
+		'angle_grid = rudolph_angle_grid(rudolph_spec)' \
+		'@assert length(angle_grid) == 20' \
+		'@assert isapprox(first(angle_grid), 0.0; atol=0.0, rtol=0.0)' \
+		'@assert isapprox(last(angle_grid), pi / 2; atol=0.0, rtol=0.0)' \
+		'reduced_sweep = run_sweep(backend, rudolph_spec; angle_indices=[10, 15, 20])' \
+		'@assert reduced_sweep.backend == "julia_pauliprop"' \
+		'@assert reduced_sweep.task_id == "rudolph_eagle_127_tfi_l20_z62_sweep"' \
+		'@assert reduced_sweep.success' \
+		'@assert length(reduced_sweep.results) == 3' \
+		'@assert all(point -> point.success, reduced_sweep.results)' \
+		'@assert all(point -> isfinite(point.expectation), reduced_sweep.results)' \
+		'@assert all(point -> point.runtime_sec >= 0, reduced_sweep.results)' \
+		'@assert all(point -> point.memory_bytes >= 0, reduced_sweep.results)' \
+		'@assert all(point -> point.final_terms >= 0, reduced_sweep.results)' \
+		'@assert reduced_sweep.metadata["angle_count"] == 20' \
+		'@assert reduced_sweep.metadata["evaluated_angle_count"] == 3' \
+		'@assert reduced_sweep.metadata["max_weight"] == 8' \
+		'@assert reduced_sweep.metadata["min_abs_coeff"] == 1.0e-4' \
+		'sweep_dict = benchmark_sweep_result_dict(reduced_sweep)' \
+		'@assert length(sweep_dict["results"]) == 3' \
+		'@assert sweep_dict["metadata"]["reference_arxiv"] == "https://arxiv.org/abs/2505.21606"' \
 		'println("temporary smoke tests passed")' \
 		> "$$tmp/runtests.jl"; \
 	PPS_TEST_TMP="$$tmp" $(JULIA) "$$tmp/runtests.jl"
@@ -77,6 +112,9 @@ smoke:
 
 smoke-eagle:
 	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_backend.jl --backend julia_pauliprop --config configs/bench_eagle_127.toml
+
+reproduce-rudolph-eagle:
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend julia_pauliprop --config configs/reproduce_rudolph_eagle_127.toml
 
 bench-small:
 	$(JULIA) benchmarks/run_all.jl --config configs/bench_small.toml

@@ -1,0 +1,29 @@
+name = "reproduce_rudolph_eagle_127"
+seed = 20250527
+
+[task]
+task_id = "rudolph_eagle_127_tfi_l20_z62_sweep"
+family = "rudolph_eagle_127"
+nqubits = 127
+nlayers = 20
+observable = "Z62"
+
+[truncation]
+method = "threshold"
+threshold = 1.0e-4
+
+[reference]
+enabled = false
+method = "truncated_pauli_propagation_sweep"
+
+[metadata]
+topology = "ibm_eagle"
+angle_start = 0.0
+angle_stop = 1.5707963267948966
+angle_count = 20
+max_weight = 8
+observable_julia_index = 63
+reference_arxiv = "https://arxiv.org/abs/2505.21606"
+reference_code = "https://github.com/MSRudolph/PauliPropagation.jl"
+ibm_kicked_ising_context = "https://quantum.cloud.ibm.com/docs/tutorials/dc-hex-ising"
+comparison_note = "Rudolph PauliPropagation.jl 127-qubit utility example sweep; not IBM hardware noise mitigation."
