@@ -58,6 +58,75 @@ function run_direct_builder(backend::JuliaPauliPropBackend, spec::BenchmarkSpec)
     )
 end
 
+function run_sweep(
+    backend::JuliaPauliPropBackend,
+    spec::BenchmarkSpec;
+    angle_indices=nothing,
+)
+    spec.family == "rudolph_eagle_127" ||
+        throw(ArgumentError("run_sweep currently supports family = rudolph_eagle_127"))
+
+    circuit, _, _ = _export_task_components(spec)
+    observable = _parse_observable(spec.nqubits, spec.observable)
+    angles = rudolph_angle_grid(spec)
+    selected_indices = isnothing(angle_indices) ? collect(eachindex(angles)) : collect(angle_indices)
+    threshold = _threshold(spec.truncation)
+    max_weight = Int(get(spec.metadata, "max_weight", 8))
+    parameter_count = countparameters(circuit)
+
+    points = BenchmarkSweepPoint[]
+    for angle_index in selected_indices
+        1 <= angle_index <= length(angles) ||
+            throw(ArgumentError("angle index $angle_index is outside 1:$(length(angles))"))
+        angle = Float64(angles[angle_index])
+        thetas = fill(angle, parameter_count)
+        point = _run_pauliprop_sweep_point(
+            backend,
+            circuit,
+            thetas,
+            observable,
+            angle_index,
+            angle,
+            threshold,
+            max_weight,
+        )
+        push!(points, point)
+    end
+
+    metadata = copy(spec.metadata)
+    merge!(
+        metadata,
+        Dict{String,Any}(
+            "family" => spec.family,
+            "nqubits" => spec.nqubits,
+            "nlayers" => spec.nlayers,
+            "observable" => spec.observable,
+            "topology" => "ibm_eagle",
+            "angle_start" => first(angles),
+            "angle_stop" => last(angles),
+            "angle_count" => length(angles),
+            "evaluated_angle_count" => length(points),
+            "min_abs_coeff" => threshold,
+            "max_weight" => max_weight,
+            "circuit_size" => length(circuit),
+            "parameter_count" => parameter_count,
+            "benchmark_samples" => backend.samples,
+            "benchmark_evals" => backend.evals,
+            "reference_arxiv" => "https://arxiv.org/abs/2505.21606",
+            "reference_code" => "https://github.com/MSRudolph/PauliPropagation.jl",
+            "ibm_kicked_ising_context" => "https://quantum.cloud.ibm.com/docs/tutorials/dc-hex-ising",
+        ),
+    )
+
+    return BenchmarkSweepResult(
+        backend_name(backend),
+        spec.task_id,
+        all(point -> point.success, points),
+        points,
+        metadata,
+    )
+end
+
 function _run_pauliprop_task(
     backend::JuliaPauliPropBackend,
     task_id::AbstractString,
@@ -106,6 +175,45 @@ function _run_pauliprop_task(
         expectation,
         reference,
         abs(expectation - reference),
+        metadata,
+    )
+end
+
+function _run_pauliprop_sweep_point(
+    backend::JuliaPauliPropBackend,
+    circuit,
+    thetas,
+    observable,
+    angle_index::Int,
+    angle::Float64,
+    threshold::Float64,
+    max_weight::Int,
+)
+    threshold_run = () -> propagate(circuit, observable, thetas; min_abs_coeff=threshold, max_weight=max_weight)
+
+    samples = backend.samples
+    evals = backend.evals
+    trial = run(@benchmarkable $threshold_run() samples = samples evals = evals)
+    threshold_result = threshold_run()
+    expectation = Float64(real(overlapwithzero(threshold_result)))
+    med = median(trial)
+    min_est = minimum(trial)
+
+    metadata = Dict{String,Any}(
+        "minimum_time_sec" => Float64(min_est.time) / 1.0e9,
+        "median_time_sec" => Float64(med.time) / 1.0e9,
+        "median_gctime_sec" => Float64(med.gctime) / 1.0e9,
+        "median_allocs" => Int(med.allocs),
+    )
+
+    return BenchmarkSweepPoint(
+        angle_index,
+        angle,
+        true,
+        Float64(med.time) / 1.0e9,
+        Int(med.memory),
+        length(threshold_result.terms),
+        expectation,
         metadata,
     )
 end

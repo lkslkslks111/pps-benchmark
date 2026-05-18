@@ -31,6 +31,25 @@ struct BenchmarkResult
     metadata::Dict{String,Any}
 end
 
+struct BenchmarkSweepPoint
+    angle_index::Int
+    angle::Float64
+    success::Bool
+    runtime_sec::Float64
+    memory_bytes::Int
+    final_terms::Int
+    expectation::Float64
+    metadata::Dict{String,Any}
+end
+
+struct BenchmarkSweepResult
+    backend::String
+    task_id::String
+    success::Bool
+    results::Vector{BenchmarkSweepPoint}
+    metadata::Dict{String,Any}
+end
+
 struct CircuitGate
     type::String
     paulis::Vector{String}
@@ -91,17 +110,56 @@ function benchmark_result_dict(result::BenchmarkResult)
     )
 end
 
+function benchmark_sweep_result_dict(result::BenchmarkSweepResult)
+    return Dict{String,Any}(
+        "backend" => result.backend,
+        "task_id" => result.task_id,
+        "success" => result.success,
+        "results" => [
+            Dict{String,Any}(
+                "angle_index" => point.angle_index,
+                "angle" => point.angle,
+                "success" => point.success,
+                "runtime_sec" => point.runtime_sec,
+                "memory_bytes" => point.memory_bytes,
+                "final_terms" => point.final_terms,
+                "expectation" => point.expectation,
+                "metadata" => point.metadata,
+            )
+            for point in result.results
+        ],
+        "metadata" => result.metadata,
+    )
+end
+
 function export_circuit(spec::BenchmarkSpec)
     circuit, thetas, family_metadata = _export_task_components(spec)
-    gates = CircuitGate[
-        CircuitGate(
-            CIRCUIT_GATE_TYPE_PAULI_ROTATION,
-            String.(gate.symbols),
-            Int.(gate.qinds .- 1),
-            Float64(theta),
+    gates = CircuitGate[]
+    theta_idx = 1
+    for gate in circuit
+        theta = if gate isa FrozenGate
+            Float64(gate.parameter)
+        elseif gate isa ParametrizedGate
+            theta_idx <= length(thetas) ||
+                throw(ArgumentError("missing theta for parametrized gate $theta_idx"))
+            value = Float64(thetas[theta_idx])
+            theta_idx += 1
+            value
+        else
+            throw(ArgumentError("unsupported circuit gate for export: $(typeof(gate))"))
+        end
+        push!(
+            gates,
+            CircuitGate(
+                CIRCUIT_GATE_TYPE_PAULI_ROTATION,
+                String.(_pauli_rotation_symbols(gate)),
+                Int.(_pauli_rotation_qinds(gate) .- 1),
+                theta,
+            ),
         )
-        for (gate, theta) in zip(circuit, thetas)
-    ]
+    end
+    theta_idx == length(thetas) + 1 ||
+        throw(ArgumentError("unused theta values while exporting circuit"))
 
     metadata = copy(spec.metadata)
     metadata["nlayers"] = spec.nlayers
@@ -141,9 +199,35 @@ function _export_task_components(spec::BenchmarkSpec)
             "reproduction_scope" => "127-qubit Julia PauliPropagation scaffold; not IBM hardware noise mitigation",
         )
         return circuit, thetas, metadata
+    elseif spec.family == "rudolph_eagle_127"
+        spec.nqubits == 127 ||
+            throw(ArgumentError("rudolph_eagle_127 requires nqubits = 127"))
+        spec.nlayers == 20 ||
+            throw(ArgumentError("rudolph_eagle_127 requires nlayers = 20"))
+        circuit = _rudolph_eagle_127_circuit(spec.nlayers)
+        thetas = zeros(Float64, countparameters(circuit))
+        metadata = Dict{String,Any}(
+            "topology" => "ibm_eagle",
+            "parameter_rule" => "RX parameters sweep LinRange(0, pi/2, 20); RZZ rotations are frozen at -pi/2",
+            "observable_julia_index" => 63,
+            "reference_arxiv" => "https://arxiv.org/abs/2505.21606",
+            "reference_code" => "https://github.com/MSRudolph/PauliPropagation.jl",
+            "ibm_kicked_ising_context" => "https://quantum.cloud.ibm.com/docs/tutorials/dc-hex-ising",
+            "reproduction_scope" => "Julia PauliPropagation.jl 127-qubit utility example sweep; not IBM hardware noise mitigation",
+        )
+        return circuit, thetas, metadata
     end
 
     throw(ArgumentError("unsupported benchmark family: $(spec.family)"))
+end
+
+function _rudolph_eagle_127_circuit(nlayers::Int)
+    circuit = Gate[]
+    for _ in 1:nlayers
+        rxlayer!(circuit, 127)
+        append!(circuit, (PauliRotation([:Z, :Z], pair, -pi / 2) for pair in ibmeagletopology))
+    end
+    return circuit
 end
 
 function _ibm_eagle_tfi_theta(gate)
@@ -153,6 +237,32 @@ function _ibm_eagle_tfi_theta(gate)
         return Float64(pi / 8)
     end
     throw(ArgumentError("unsupported ibm_eagle_tfi gate symbols: $(gate.symbols)"))
+end
+
+function _pauli_rotation_symbols(gate::PauliRotation)
+    return gate.symbols
+end
+
+function _pauli_rotation_symbols(gate::FrozenGate)
+    return _pauli_rotation_symbols(gate.gate)
+end
+
+function _pauli_rotation_qinds(gate::PauliRotation)
+    return gate.qinds
+end
+
+function _pauli_rotation_qinds(gate::FrozenGate)
+    return _pauli_rotation_qinds(gate.gate)
+end
+
+function rudolph_angle_grid(spec::BenchmarkSpec)
+    spec.family == "rudolph_eagle_127" ||
+        throw(ArgumentError("rudolph_angle_grid requires family = rudolph_eagle_127"))
+    start = Float64(get(spec.metadata, "angle_start", 0.0))
+    stop = Float64(get(spec.metadata, "angle_stop", pi / 2))
+    count = Int(get(spec.metadata, "angle_count", 20))
+    count > 1 || throw(ArgumentError("angle_count must be greater than 1"))
+    return collect(LinRange(start, stop, count))
 end
 
 function circuit_description_dict(description::CircuitDescription)
