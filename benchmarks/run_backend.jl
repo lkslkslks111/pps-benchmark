@@ -4,7 +4,7 @@ using JSON3
 using PPSBackendBench
 
 function _usage()
-    return "usage: julia --project=. benchmarks/run_backend.jl --backend julia_pauliprop --config configs/bench_small.toml"
+    return "usage: julia --project=. benchmarks/run_backend.jl --backend julia_pauliprop --config configs/bench_small.toml [--circuit circuit.json]"
 end
 
 function _parse_args(args)
@@ -12,7 +12,7 @@ function _parse_args(args)
     i = 1
     while i <= length(args)
         arg = args[i]
-        if arg in ("--backend", "--config")
+        if arg in ("--backend", "--config", "--circuit")
             i < length(args) || throw(ArgumentError("missing value for $arg"))
             parsed[arg[3:end]] = args[i + 1]
             i += 2
@@ -22,7 +22,8 @@ function _parse_args(args)
     end
 
     haskey(parsed, "backend") || throw(ArgumentError("missing --backend; $(_usage())"))
-    haskey(parsed, "config") || throw(ArgumentError("missing --config; $(_usage())"))
+    (haskey(parsed, "config") || haskey(parsed, "circuit")) ||
+        throw(ArgumentError("missing --config or --circuit; $(_usage())"))
     return parsed
 end
 
@@ -35,9 +36,14 @@ end
 
 function main(args)
     parsed = _parse_args(args)
-    spec = load_benchmark_spec(parsed["config"])
     backend = _make_backend(parsed["backend"])
-    result = run_backend(backend, spec)
+    result = if haskey(parsed, "circuit")
+        circuit_description = load_circuit_description(parsed["circuit"])
+        run_backend(backend, circuit_description; circuit_source="circuit_json")
+    else
+        spec = load_benchmark_spec(parsed["config"])
+        run_backend(backend, spec)
+    end
     println(JSON3.write(benchmark_result_dict(result)))
     return 0
 end

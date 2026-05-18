@@ -15,11 +15,61 @@ end
 backend_name(::JuliaPauliPropBackend) = "julia_pauliprop"
 
 function run_backend(backend::JuliaPauliPropBackend, spec::BenchmarkSpec)
+    circuit_description = export_circuit(spec)
+    return run_backend(backend, circuit_description; circuit_source="exported_from_spec")
+end
+
+function run_backend(
+    backend::JuliaPauliPropBackend,
+    circuit_description::CircuitDescription;
+    circuit_source::AbstractString="explicit_circuit",
+)
+    _validate_circuit_description(circuit_description)
+    circuit, thetas, observable = _build_pauliprop_task(circuit_description)
+    metadata_extra = Dict{String,Any}(
+        "circuit_schema_version" => circuit_description.schema_version,
+        "circuit_source" => String(circuit_source),
+    )
+    return _run_pauliprop_task(
+        backend,
+        circuit_description.task_id,
+        circuit_description.truncation,
+        circuit_description.observable,
+        circuit,
+        thetas,
+        observable,
+        metadata_extra,
+    )
+end
+
+function run_direct_builder(backend::JuliaPauliPropBackend, spec::BenchmarkSpec)
     spec.family == "clifford_pauli_rotation" ||
         throw(ArgumentError("unsupported benchmark family: $(spec.family)"))
 
     circuit, thetas, observable = _build_pauliprop_task(spec)
-    threshold = _threshold(spec)
+    return _run_pauliprop_task(
+        backend,
+        spec.task_id,
+        spec.truncation,
+        spec.observable,
+        circuit,
+        thetas,
+        observable,
+        Dict{String,Any}("circuit_source" => "direct_builder"),
+    )
+end
+
+function _run_pauliprop_task(
+    backend::JuliaPauliPropBackend,
+    task_id::AbstractString,
+    truncation::Dict{String,Any},
+    observable_label::AbstractString,
+    circuit,
+    thetas,
+    observable,
+    metadata_extra::Dict{String,Any},
+)
+    threshold = _threshold(truncation)
     threshold_run = () -> propagate(circuit, observable, thetas; min_abs_coeff=threshold)
 
     samples = backend.samples
@@ -43,12 +93,13 @@ function run_backend(backend::JuliaPauliPropBackend, spec::BenchmarkSpec)
         "circuit_size" => length(circuit),
         "parameter_count" => length(thetas),
         "truncation_threshold" => threshold,
-        "observable" => spec.observable,
+        "observable" => String(observable_label),
     )
+    merge!(metadata, metadata_extra)
 
     return BenchmarkResult(
         backend_name(backend),
-        spec.task_id,
+        String(task_id),
         true,
         Float64(med.time) / 1.0e9,
         Int(med.memory),
@@ -67,6 +118,16 @@ function _build_pauliprop_task(spec::BenchmarkSpec)
     return circuit, thetas, observable
 end
 
+function _build_pauliprop_task(description::CircuitDescription)
+    circuit = [
+        PauliRotation(Symbol.(gate.paulis), Int.(gate.qubits .+ 1))
+        for gate in description.gates
+    ]
+    thetas = [gate.theta for gate in description.gates]
+    observable = _parse_observable(description.nqubits, description.observable)
+    return circuit, thetas, observable
+end
+
 function _parse_observable(nqubits::Int, observable::AbstractString)
     match_result = match(r"^([IXYZ])(\d+)$", observable)
     match_result === nothing && throw(ArgumentError("unsupported observable: $observable"))
@@ -81,7 +142,11 @@ function _parse_observable(nqubits::Int, observable::AbstractString)
 end
 
 function _threshold(spec::BenchmarkSpec)
-    method = get(spec.truncation, "method", "")
+    return _threshold(spec.truncation)
+end
+
+function _threshold(truncation::Dict{String,Any})
+    method = get(truncation, "method", "")
     method == "threshold" || throw(ArgumentError("unsupported truncation method: $method"))
-    return Float64(spec.truncation["threshold"])
+    return Float64(truncation["threshold"])
 end
