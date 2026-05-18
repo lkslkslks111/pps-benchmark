@@ -64,3 +64,10 @@ theta_i = sin(seed + i)
 ```
 
 where `i` is 1-based in Julia parameter order. After export, backend smoke runs must use the explicit `gates` list and must not rebuild the circuit internally from the compact task spec.
+
+For `family = "ibm_eagle_tfi"`, Julia exports a 127-qubit transverse-field Ising smoke circuit using PauliPropagation.jl's `ibmeagletopology` and `tfitrottercircuit`. This family is a scaffold for the IBM Eagle utility-scale kicked Ising workload, not a full reproduction of hardware noise mitigation or the original multi-parameter sweep. Its deterministic parameters are:
+
+```julia
+theta_ZZ = pi / 4
+theta_X = pi / 8
+```
