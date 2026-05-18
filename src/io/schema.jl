@@ -58,6 +58,10 @@ end
 function load_benchmark_spec(path::AbstractString)
     config = TOML.parsefile(path)
     task = config["task"]
+    metadata = Dict{String,Any}("name" => String(config["name"]), "config_path" => String(path))
+    if haskey(config, "metadata")
+        merge!(metadata, _string_any_dict(config["metadata"]))
+    end
 
     return BenchmarkSpec(
         String(task["task_id"]),
@@ -68,7 +72,7 @@ function load_benchmark_spec(path::AbstractString)
         Int(config["seed"]),
         _string_any_dict(config["truncation"]),
         _string_any_dict(config["reference"]),
-        Dict{String,Any}("name" => String(config["name"]), "config_path" => String(path)),
+        metadata,
     )
 end
 
@@ -88,11 +92,7 @@ function benchmark_result_dict(result::BenchmarkResult)
 end
 
 function export_circuit(spec::BenchmarkSpec)
-    spec.family == "clifford_pauli_rotation" ||
-        throw(ArgumentError("unsupported benchmark family: $(spec.family)"))
-
-    circuit = hardwareefficientcircuit(spec.nqubits, spec.nlayers)
-    thetas = [sin(spec.seed + idx) for idx in 1:countparameters(circuit)]
+    circuit, thetas, family_metadata = _export_task_components(spec)
     gates = CircuitGate[
         CircuitGate(
             CIRCUIT_GATE_TYPE_PAULI_ROTATION,
@@ -105,6 +105,7 @@ function export_circuit(spec::BenchmarkSpec)
 
     metadata = copy(spec.metadata)
     metadata["nlayers"] = spec.nlayers
+    merge!(metadata, family_metadata)
 
     description = CircuitDescription(
         CIRCUIT_SCHEMA_VERSION,
@@ -120,6 +121,38 @@ function export_circuit(spec::BenchmarkSpec)
     )
     _validate_circuit_description(description)
     return description
+end
+
+function _export_task_components(spec::BenchmarkSpec)
+    if spec.family == "clifford_pauli_rotation"
+        circuit = hardwareefficientcircuit(spec.nqubits, spec.nlayers)
+        thetas = [sin(spec.seed + idx) for idx in 1:countparameters(circuit)]
+        metadata = Dict{String,Any}("parameter_rule" => "theta_i = sin(seed + i)")
+        return circuit, thetas, metadata
+    elseif spec.family == "ibm_eagle_tfi"
+        spec.nqubits == 127 ||
+            throw(ArgumentError("ibm_eagle_tfi requires nqubits = 127"))
+        circuit = tfitrottercircuit(127, spec.nlayers; topology=ibmeagletopology, start_with_ZZ=true)
+        thetas = [_ibm_eagle_tfi_theta(gate) for gate in circuit]
+        metadata = Dict{String,Any}(
+            "topology" => "ibm_eagle",
+            "parameter_rule" => "ZZ rotations use pi/4; X rotations use pi/8",
+            "reference_paper" => "IBM Nature 618, 500-505 (2023)",
+            "reproduction_scope" => "127-qubit Julia PauliPropagation scaffold; not IBM hardware noise mitigation",
+        )
+        return circuit, thetas, metadata
+    end
+
+    throw(ArgumentError("unsupported benchmark family: $(spec.family)"))
+end
+
+function _ibm_eagle_tfi_theta(gate)
+    if gate.symbols == [:Z, :Z]
+        return Float64(pi / 4)
+    elseif gate.symbols == [:X]
+        return Float64(pi / 8)
+    end
+    throw(ArgumentError("unsupported ibm_eagle_tfi gate symbols: $(gate.symbols)"))
 end
 
 function circuit_description_dict(description::CircuitDescription)

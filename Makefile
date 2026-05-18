@@ -1,6 +1,6 @@
 JULIA = julia --project=.
 
-.PHONY: instantiate test smoke bench-small clean
+.PHONY: instantiate test smoke smoke-eagle bench-small clean
 
 instantiate:
 	$(JULIA) -e 'using Pkg; Pkg.instantiate()'
@@ -51,12 +51,32 @@ test:
 		'@test_throws ArgumentError run_backend(backend, invalid_gate)' \
 		'invalid_shape = CircuitDescription("pps-circuit-v1", spec.task_id, spec.family, spec.seed, spec.nqubits, spec.observable, spec.truncation, spec.reference, [CircuitGate("pauli_rotation", ["X", "Y"], [0], 0.1)], Dict{String,Any}())' \
 		'@test_throws ArgumentError run_backend(backend, invalid_shape)' \
+		'eagle_spec = load_benchmark_spec("configs/bench_eagle_127.toml")' \
+		'eagle_circuit = export_circuit(eagle_spec)' \
+		'@assert eagle_circuit.family == "ibm_eagle_tfi"' \
+		'@assert eagle_circuit.nqubits == 127' \
+		'@assert eagle_circuit.metadata["topology"] == "ibm_eagle"' \
+		'@assert eagle_circuit.metadata["reference_paper"] == "IBM Nature 618, 500-505 (2023)"' \
+		'@assert length(eagle_circuit.gates) == 271' \
+		'@assert count(gate -> gate.paulis == ["Z", "Z"], eagle_circuit.gates) == 144' \
+		'@assert count(gate -> gate.paulis == ["X"], eagle_circuit.gates) == 127' \
+		'@assert all(0 <= q < 127 for gate in eagle_circuit.gates for q in gate.qubits)' \
+		'eagle_result = run_backend(backend, eagle_circuit; circuit_source="eagle_127_test")' \
+		'@assert eagle_result.success' \
+		'@assert eagle_result.task_id == "ibm_eagle_127_tfi_l1_z0"' \
+		'@assert eagle_result.metadata["circuit_source"] == "eagle_127_test"' \
+		'@assert eagle_result.metadata["circuit_schema_version"] == "pps-circuit-v1"' \
+		'@assert eagle_result.metadata["family"] == "ibm_eagle_tfi"' \
+		'@assert eagle_result.metadata["nqubits"] == 127' \
 		'println("temporary smoke tests passed")' \
 		> "$$tmp/runtests.jl"; \
 	PPS_TEST_TMP="$$tmp" $(JULIA) "$$tmp/runtests.jl"
 
 smoke:
 	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_backend.jl --backend julia_pauliprop --config configs/bench_small.toml
+
+smoke-eagle:
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_backend.jl --backend julia_pauliprop --config configs/bench_eagle_127.toml
 
 bench-small:
 	$(JULIA) benchmarks/run_all.jl --config configs/bench_small.toml

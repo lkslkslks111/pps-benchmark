@@ -29,6 +29,8 @@ function run_backend(
     metadata_extra = Dict{String,Any}(
         "circuit_schema_version" => circuit_description.schema_version,
         "circuit_source" => String(circuit_source),
+        "family" => circuit_description.family,
+        "nqubits" => circuit_description.nqubits,
     )
     return _run_pauliprop_task(
         backend,
@@ -43,9 +45,6 @@ function run_backend(
 end
 
 function run_direct_builder(backend::JuliaPauliPropBackend, spec::BenchmarkSpec)
-    spec.family == "clifford_pauli_rotation" ||
-        throw(ArgumentError("unsupported benchmark family: $(spec.family)"))
-
     circuit, thetas, observable = _build_pauliprop_task(spec)
     return _run_pauliprop_task(
         backend,
@@ -112,8 +111,7 @@ function _run_pauliprop_task(
 end
 
 function _build_pauliprop_task(spec::BenchmarkSpec)
-    circuit = hardwareefficientcircuit(spec.nqubits, spec.nlayers)
-    thetas = [sin(spec.seed + idx) for idx in 1:countparameters(circuit)]
+    circuit, thetas, _ = _export_task_components(spec)
     observable = _parse_observable(spec.nqubits, spec.observable)
     return circuit, thetas, observable
 end

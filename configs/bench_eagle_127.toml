@@ -1,0 +1,23 @@
+name = "bench_eagle_127"
+seed = 20230614
+
+[task]
+task_id = "ibm_eagle_127_tfi_l1_z0"
+family = "ibm_eagle_tfi"
+nqubits = 127
+nlayers = 1
+observable = "Z0"
+
+[truncation]
+method = "threshold"
+threshold = 1.0e-8
+
+[reference]
+enabled = true
+method = "exact_scaffold"
+
+[metadata]
+topology = "ibm_eagle"
+reference_paper = "IBM Nature 618, 500-505 (2023)"
+reference_url = "https://research.ibm.com/publications/evidence-for-the-utility-of-quantum-computing-before-fault-tolerance"
+comparison_note = "127-qubit PauliPropagation scaffold only; not a reproduction of IBM hardware noise mitigation or full 60-step parameter sweep."
