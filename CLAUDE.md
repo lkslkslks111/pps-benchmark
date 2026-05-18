@@ -21,6 +21,11 @@ Phase 1 only implements the Julia orchestration layer and the Julia / PauliPropa
 
 Do not implement CUDA, C++, Rust, BlueQubit, or cuQuantum Python until the Julia-only benchmark pipeline is working.
 
+## Working Method
+
+- Always enter plan mode first. Before touching any code, investigate the task and present a plan for approval. Do not start implementing until the plan is approved.
+- Use the Superpowers skills. Apply the relevant `superpowers:*` skill for the work at hand — e.g. `brainstorming` for new features, `writing-plans` for multi-step tasks, `test-driven-development` for implementation, `systematic-debugging` for bugs, and `verification-before-completion` before claiming work is done.
+
 ## Core Workflow
 
 No Issue, no code change.
