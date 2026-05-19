@@ -123,6 +123,29 @@ The paper reports near-exact agreement for panel a at `ℓ=40, W=8`; expect a sm
 `rmse`. At `θ_h = 0` the circuit is fully Clifford, so `f̂(0) = 1.0` exactly for both
 observables — a quick correctness check.
 
+## Reproducibility and cluster execution
+
+The full 127-qubit sweep exhausts laptop memory and is OOM-killed. It is run on a
+PBS cluster node with ~400 GB of RAM.
+
+- **Julia 1.11.5** is the standard environment for the whole project. `Manifest.toml`
+  is resolved under Julia 1.11; use Julia 1.11.x both locally and on the cluster.
+  (Patch version is irrelevant — manifests are keyed by minor version.)
+- All backends are benchmarked **single-core** for fair cross-language comparison.
+- `scripts/run_lowesa127.pbs` is the PBS job script: `select=1:ncpus=1:mem=400gb`,
+  loads `julia/1.11.5`, instantiates + precompiles, runs `make test` / `make smoke`
+  as a fast environment check, then `make benchmark-lowesa-127`.
+
+```bash
+git clone <repo> && cd pps-benchmark
+git checkout issue-9-lowesa-tfi-127-l5
+qsub scripts/run_lowesa127.pbs        # submit from the repository root
+```
+
+Results land in `results/lowesa_tfi_127_L5_*.json` on the cluster (git-ignored by
+design); copy them back with `scp`. If the job runs out of walltime, raise
+`walltime` or split the Mz and Z62 runs into separate jobs — never raise `ncpus`.
+
 ## Scope
 
 Phase 1: Julia / PauliPropagation.jl backend only. The benchmark spec
