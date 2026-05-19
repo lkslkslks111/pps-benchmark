@@ -156,8 +156,9 @@ reproduce-rudolph-eagle:
 	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend julia_pauliprop --config configs/reproduce_rudolph_eagle_127.toml
 
 benchmark-lowesa-127:
-	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend julia_pauliprop --config configs/lowesa_tfi_127_L5_mz.toml
-	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend julia_pauliprop --config configs/lowesa_tfi_127_L5_z62.toml
+	@mkdir -p results results/tmp
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend julia_pauliprop --config configs/lowesa_tfi_127_L5_mz.toml > results/tmp/lowesa_tfi_127_L5_mz.json && mv results/tmp/lowesa_tfi_127_L5_mz.json results/lowesa_tfi_127_L5_mz.json
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend julia_pauliprop --config configs/lowesa_tfi_127_L5_z62.toml > results/tmp/lowesa_tfi_127_L5_z62.json && mv results/tmp/lowesa_tfi_127_L5_z62.json results/lowesa_tfi_127_L5_z62.json
 
 bench-small:
 	$(JULIA) benchmarks/run_all.jl --config configs/bench_small.toml
