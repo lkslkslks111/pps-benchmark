@@ -19,9 +19,13 @@ export AbstractBackend,
     export_circuit,
     load_benchmark_spec,
     load_circuit_description,
+    lowesa_angle_grid,
+    lowesa_reference_curve,
+    reference_curve_path,
     rudolph_angle_grid,
     run_backend,
     run_direct_builder,
+    run_surrogate_sweep,
     run_sweep,
     write_circuit_description
 

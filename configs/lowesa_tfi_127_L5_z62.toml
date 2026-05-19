@@ -1,0 +1,29 @@
+name = "lowesa_tfi_127_L5_z62"
+seed = 20230501
+
+[task]
+task_id = "lowesa_tfi_127_l5_z62_sweep"
+family = "lowesa_tfi_127"
+nqubits = 127
+nlayers = 5
+observable = "Z62"
+
+[truncation]
+method = "lowesa_surrogate"
+max_freq = 40
+max_weight = 8
+
+[reference]
+enabled = true
+method = "ibm_utility_exact"
+file = "reference/ibm_utility_L5_Z62.txt"
+
+[metadata]
+topology = "ibm_eagle"
+angle_start = 0.0
+angle_stop = 1.5707963267948966
+angle_count = 158
+reference_paper = "Kim et al., Evidence for the utility of quantum computing before fault tolerance, Nature 618, 500-505 (2023)"
+reference_arxiv = "https://arxiv.org/abs/2308.09109"
+lowesa_paper = "Rudolph et al. 2023, Classical Surrogate Simulation of Quantum Systems with LOWESA"
+comparison_note = "Single-site magnetization <Z_62> (0-based) companion to the Mz benchmark. RMSE is computed against the IBM utility-paper per-qubit exact data."
