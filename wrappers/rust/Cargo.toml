@@ -1,0 +1,30 @@
+[package]
+name = "rust_pauliprop"
+version = "0.1.0"
+edition = "2021"
+description = "Rust / Qiskit pauli-prop benchmark backend for pps-benchmark"
+license = "Apache-2.0"
+
+[lib]
+name = "rust_pauliprop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rust_pauliprop_runner"
+path = "src/main.rs"
+required-features = ["python"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+pyo3 = { version = "0.22", features = ["auto-initialize"], optional = true }
+
+[features]
+default = ["python"]
+# `python` pulls in PyO3, which embeds CPython and needs a Python interpreter
+# (with `pauli-prop` installed) at build and run time. Pure-logic unit tests run
+# without it: `cargo test --no-default-features --lib`.
+python = ["dep:pyo3"]
+
+[profile.release]
+debug = false

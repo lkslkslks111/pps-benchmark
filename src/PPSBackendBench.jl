@@ -3,6 +3,7 @@ module PPSBackendBench
 include("io/schema.jl")
 include("backends/abstract.jl")
 include("backends/julia_pauliprop.jl")
+include("backends/rust_pauliprop.jl")
 
 export AbstractBackend,
     BenchmarkResult,
@@ -12,6 +13,7 @@ export AbstractBackend,
     CircuitDescription,
     CircuitGate,
     JuliaPauliPropBackend,
+    RustPauliPropBackend,
     backend_name,
     benchmark_result_dict,
     benchmark_sweep_result_dict,

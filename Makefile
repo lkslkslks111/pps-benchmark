@@ -1,6 +1,7 @@
 JULIA = julia --project=.
 
-.PHONY: instantiate test smoke smoke-eagle reproduce-rudolph-eagle bench-small clean
+.PHONY: instantiate test smoke smoke-eagle reproduce-rudolph-eagle bench-small clean \
+	build-rust smoke-rust test-rust
 
 instantiate:
 	$(JULIA) -e 'using Pkg; Pkg.instantiate()'
@@ -118,6 +119,57 @@ reproduce-rudolph-eagle:
 
 bench-small:
 	$(JULIA) benchmarks/run_all.jl --config configs/bench_small.toml
+
+build-rust:
+	@test -d wrappers/rust/.venv || python3 -m venv wrappers/rust/.venv
+	@wrappers/rust/.venv/bin/pip install -q --upgrade pip
+	@wrappers/rust/.venv/bin/pip install -q -r wrappers/rust/requirements.txt
+	@PYO3_PYTHON=$(CURDIR)/wrappers/rust/.venv/bin/python \
+		cargo build --release --manifest-path wrappers/rust/Cargo.toml
+
+smoke-rust: build-rust
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_backend.jl --backend rust_pauliprop --config configs/bench_small.toml
+
+test-rust: build-rust
+	@cargo test --manifest-path wrappers/rust/Cargo.toml --no-default-features --lib
+	@tmp=$$(mktemp -d /tmp/pps-benchmark-rust-test.XXXXXX); \
+	trap 'rm -rf "$$tmp"' EXIT; \
+	printf '%s\n' \
+		'using PPSBackendBench' \
+		'using Test' \
+		'spec = load_benchmark_spec("configs/bench_small.toml")' \
+		'julia_backend = JuliaPauliPropBackend(samples=2, evals=1)' \
+		'rust_backend = RustPauliPropBackend(samples=2)' \
+		'julia_result = run_backend(julia_backend, spec)' \
+		'rust_result = run_backend(rust_backend, spec)' \
+		'@assert rust_result.backend == "rust_pauliprop"' \
+		'@assert rust_result.task_id == julia_result.task_id' \
+		'@assert rust_result.success' \
+		'@assert rust_result.final_terms > 0' \
+		'@assert rust_result.runtime_sec >= 0' \
+		'@assert rust_result.memory_bytes >= 0' \
+		'@assert isfinite(rust_result.expectation)' \
+		'@assert isfinite(rust_result.reference)' \
+		'@assert rust_result.absolute_error >= 0' \
+		'@assert isapprox(rust_result.expectation, julia_result.expectation; atol=1e-6, rtol=0)' \
+		'@assert isapprox(rust_result.reference, julia_result.reference; atol=1e-6, rtol=0)' \
+		'@assert rust_result.metadata["engine"] == "qiskit_pauli_prop"' \
+		'@assert haskey(rust_result.metadata, "pauli_prop_version")' \
+		'@assert haskey(rust_result.metadata, "qiskit_version")' \
+		'@assert haskey(rust_result.metadata, "median_time_sec")' \
+		'@assert haskey(rust_result.metadata, "truncated_one_norm")' \
+		'@assert rust_result.metadata["circuit_source"] == "exported_from_spec"' \
+		'@assert rust_result.metadata["circuit_schema_version"] == "pps-circuit-v1"' \
+		'desc = export_circuit(spec)' \
+		'rust_explicit = run_backend(rust_backend, desc; circuit_source="circuit_json")' \
+		'@assert rust_explicit.success' \
+		'@assert rust_explicit.metadata["circuit_source"] == "circuit_json"' \
+		'@assert isapprox(rust_explicit.expectation, julia_result.expectation; atol=1e-6, rtol=0)' \
+		'missing_backend = RustPauliPropBackend(binary_path="/nonexistent/rust_pauliprop_runner", samples=2)' \
+		'@test_throws ErrorException run_backend(missing_backend, spec)' \
+		'println("rust_pauliprop comparison tests passed")' \
+		> "$$tmp/runtests.jl"; \
+	JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) "$$tmp/runtests.jl"
 
 clean:
 	rm -rf results/tmp/*
