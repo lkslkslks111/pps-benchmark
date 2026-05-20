@@ -36,6 +36,10 @@ fn run() -> Result<String, String> {
         .map_err(|e| format!("cannot read circuit file '{circuit_path}': {e}"))?;
     let description = circuit::parse_circuit(&json)?;
 
+    // Single-core benchmark policy: cap thread pools before any Python or BLAS
+    // library initialises (they latch the value at first use).
+    let thread_limits = enforce_single_core_threads();
+
     // The embedded interpreter reads PYTHONPATH at initialisation, so the bundled
     // venv must be on it before the first `Python::with_gil` call.
     configure_python_path();
@@ -80,6 +84,18 @@ fn run() -> Result<String, String> {
         "circuit_schema_version".into(),
         Value::from(description.schema_version.clone()),
     );
+    metadata.insert(
+        "thread_limits".into(),
+        serde_json::to_value(&thread_limits)
+            .map_err(|e| format!("could not serialise thread_limits: {e}"))?,
+    );
+    // The Julia backend reports BenchmarkTools allocation bytes; this runner
+    // reports the whole-process VmHWM. `memory_measure` marks the difference so
+    // downstream tooling can avoid cross-backend `memory_bytes` comparisons.
+    metadata.insert(
+        "memory_measure".into(),
+        Value::from("process_peak_rss"),
+    );
 
     let result = BenchmarkResult {
         backend: BACKEND_NAME.to_string(),
@@ -94,6 +110,29 @@ fn run() -> Result<String, String> {
         metadata,
     };
     result.to_json_line()
+}
+
+/// Force every thread-pool variable that numpy/BLAS/qiskit/pauli-prop read at
+/// import time to "1", unless the caller has set them explicitly. The returned
+/// map records the resolved value of each variable for benchmark metadata.
+fn enforce_single_core_threads() -> BTreeMap<String, String> {
+    const VARS: &[&str] = &[
+        "OMP_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "VECLIB_MAXIMUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+        "RAYON_NUM_THREADS",
+    ];
+    let mut resolved = BTreeMap::new();
+    for var in VARS {
+        if std::env::var_os(var).is_none() {
+            std::env::set_var(var, "1");
+        }
+        let value = std::env::var(var).unwrap_or_else(|_| "1".to_string());
+        resolved.insert((*var).to_string(), value);
+    }
+    resolved
 }
 
 /// Make `pauli-prop` importable from the embedded interpreter.

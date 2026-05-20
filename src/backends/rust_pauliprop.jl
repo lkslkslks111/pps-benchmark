@@ -55,7 +55,7 @@ function run_backend(
             ))
         end
 
-        parsed = JSON3.read(strip(stdout_str), Dict{String,Any})
+        parsed = _parse_runner_stdout(stdout_str, stderr_str)
         metadata = _coerce_rust_metadata(parsed["metadata"])
         metadata["circuit_source"] = String(circuit_source)
 
@@ -81,4 +81,33 @@ _to_int(x::AbstractFloat) = Int(round(x))
 
 function _coerce_rust_metadata(raw)
     return Dict{String,Any}(String(k) => v for (k, v) in raw)
+end
+
+# The runner emits exactly one JSON line on stdout. Be tolerant of stray
+# preceding output (Python warnings, accidental print) and surface parse
+# failures with the runner's stderr so callers see a structured backend error
+# rather than a bare JSON3.Error.
+function _parse_runner_stdout(stdout_str::AbstractString, stderr_str::AbstractString)
+    candidate = ""
+    for line in Iterators.reverse(split(stdout_str, '\n'))
+        trimmed = strip(line)
+        if !isempty(trimmed)
+            candidate = String(trimmed)
+            break
+        end
+    end
+    if isempty(candidate)
+        throw(ErrorException(
+            "rust_pauliprop_runner produced no stdout; stderr: $(stderr_str)",
+        ))
+    end
+    try
+        return JSON3.read(candidate, Dict{String,Any})
+    catch err
+        preview = first(candidate, 500)
+        throw(ErrorException(
+            "rust_pauliprop_runner returned unparseable stdout ($(err)); " *
+            "last stdout line preview: $(preview); stderr: $(stderr_str)",
+        ))
+    end
 end

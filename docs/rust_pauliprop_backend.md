@@ -52,6 +52,9 @@ positive.
     `propagate_through_circuit`)
   - `circuit_size`, `truncation_threshold`, `observable`
   - `circuit_source`, `family`, `nqubits`, `circuit_schema_version`
+  - `thread_limits` — `{OMP,OPENBLAS,MKL,VECLIB_MAXIMUM,NUMEXPR,RAYON}_NUM_THREADS`
+    as resolved at runner startup; see [Single-core enforcement](#single-core-enforcement).
+  - `memory_measure = "process_peak_rss"` — see [Memory accounting](#memory-accounting).
   - The Julia subprocess backend overrides `circuit_source` to
     `"exported_from_spec"` when called with a `BenchmarkSpec`.
 
@@ -73,8 +76,38 @@ Pauli rotations map directly. Mixed or >2 qubit rotations fall back to a
 | anything else (mixed / 3+ qubit)     | `PauliEvolutionGate(SparsePauliOp(label), time=theta/2)` |
 
 `bench_small` (`clifford_pauli_rotation`, n=4) only exercises the first two
-rows. The third row is implemented for robustness but is unverified beyond
-parsing/construction in the current Phase 1 scope.
+rows. The third row is exercised by `make test-rust`, which adds a synthetic
+4-qubit circuit with a mixed two-qubit `["X","Z"]` rotation and a 3-qubit
+`["Y","Z","X"]` rotation, and asserts `rust_pauliprop` matches
+`julia_pauliprop` (`atol = 1e-6`) on both `expectation` and `reference`.
+
+## Single-core enforcement
+
+Single-core is the project benchmark policy. The runner sets these
+environment variables to `"1"` at startup, before the embedded interpreter
+imports `numpy`/`qiskit`/`pauli-prop` (BLAS pools and Rayon latch the value
+at first use):
+
+`OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`,
+`VECLIB_MAXIMUM_THREADS`, `NUMEXPR_NUM_THREADS`, `RAYON_NUM_THREADS`
+
+Callers can override any variable by exporting it explicitly; the runner only
+sets variables that are unset. The resolved values are recorded in
+`metadata.thread_limits` for every run.
+
+## Memory accounting
+
+The `memory_bytes` field uses different definitions across backends, so cross-
+backend comparison is meaningful only at order-of-magnitude resolution. Use
+`metadata.memory_measure` to disambiguate:
+
+| Backend            | `metadata.memory_measure` | Meaning                                                              |
+|--------------------|---------------------------|----------------------------------------------------------------------|
+| `rust_pauliprop`   | `process_peak_rss`        | `/proc/self/status:VmHWM` — whole-process peak RSS in bytes, includes CPython, numpy, qiskit, pauli-prop initialisation. |
+| `julia_pauliprop`  | (absent — `allocation_bytes` implicitly) | BenchmarkTools `median.memory` — allocation bytes attributed to the `propagate` call only. |
+
+Future backends should set `metadata.memory_measure` explicitly so downstream
+tooling can group like-for-like measurements.
 
 ## Expectation reduction
 
