@@ -30,6 +30,8 @@ end
 function _make_backend(name::AbstractString)
     if name == "julia_pauliprop"
         return JuliaPauliPropBackend()
+    elseif name == "rust_pauliprop"
+        return RustPauliPropBackend()
     end
     throw(ArgumentError("unsupported backend: $name"))
 end

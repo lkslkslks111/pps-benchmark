@@ -1,0 +1,4 @@
+# Python dependencies for the Rust / Qiskit pauli-prop benchmark backend.
+# The rust_pauliprop_runner binary embeds CPython via PyO3 and drives this API.
+# pauli-prop pulls in a compatible qiskit release as a transitive dependency.
+pauli-prop==0.2.0

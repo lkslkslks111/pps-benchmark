@@ -16,6 +16,9 @@ dist/
 *.dylib
 *.o
 
+# Rust (wrappers/rust)
+wrappers/rust/target/
+
 # Benchmark outputs
 results/*.jsonl
 results/*.json
