@@ -39,6 +39,8 @@ struct BenchmarkSweepPoint
     memory_bytes::Int
     final_terms::Int
     expectation::Float64
+    reference::Float64
+    absolute_error::Float64
     metadata::Dict{String,Any}
 end
 
@@ -124,6 +126,8 @@ function benchmark_sweep_result_dict(result::BenchmarkSweepResult)
                 "memory_bytes" => point.memory_bytes,
                 "final_terms" => point.final_terms,
                 "expectation" => point.expectation,
+                "reference" => point.reference,
+                "absolute_error" => point.absolute_error,
                 "metadata" => point.metadata,
             )
             for point in result.results
@@ -216,6 +220,21 @@ function _export_task_components(spec::BenchmarkSpec)
             "reproduction_scope" => "Julia PauliPropagation.jl 127-qubit utility example sweep; not IBM hardware noise mitigation",
         )
         return circuit, thetas, metadata
+    elseif spec.family == "lowesa_tfi_127"
+        spec.nqubits == 127 ||
+            throw(ArgumentError("lowesa_tfi_127 requires nqubits = 127"))
+        spec.nlayers >= 1 ||
+            throw(ArgumentError("lowesa_tfi_127 requires nlayers >= 1"))
+        circuit = _lowesa_tfi_127_circuit(spec.nlayers)
+        thetas = [_lowesa_tfi_theta(gate) for gate in circuit]
+        metadata = Dict{String,Any}(
+            "topology" => "ibm_eagle",
+            "parameter_rule" => "homogeneous correlated field: every RX = theta_h (swept in [0, pi/2]); every RZZ = -pi/2 (Clifford coupling J = -pi/2)",
+            "reference_arxiv" => "https://arxiv.org/abs/2308.09109",
+            "reference_code" => "https://github.com/MSRudolph/PauliPropagation.jl",
+            "reproduction_scope" => "Rudolph et al. 2023 LOWESA Fig. 2a (panel a): 127-qubit TFI, L=5, correlated-angle magnetization sweep",
+        )
+        return circuit, thetas, metadata
     end
 
     throw(ArgumentError("unsupported benchmark family: $(spec.family)"))
@@ -228,6 +247,30 @@ function _rudolph_eagle_127_circuit(nlayers::Int)
         append!(circuit, (PauliRotation([:Z, :Z], pair, -pi / 2) for pair in ibmeagletopology))
     end
     return circuit
+end
+
+# LOWESA L=5 TFI circuit: RX and RZZ are both plain (parameterised) `PauliRotation`s so
+# the circuit satisfies the surrogate's Clifford+PauliRotation-only requirement. The RZZ
+# angle (-pi/2) is supplied at evaluation time via the `thetas` vector, not frozen here.
+function _lowesa_tfi_127_circuit(nlayers::Int)
+    nlayers >= 1 || throw(ArgumentError("lowesa_tfi_127 requires nlayers >= 1"))
+    circuit = Gate[]
+    for _ in 1:nlayers
+        rxlayer!(circuit, 127)
+        append!(circuit, (PauliRotation([:Z, :Z], pair) for pair in ibmeagletopology))
+    end
+    return circuit
+end
+
+# Export-time parameter values for `lowesa_tfi_127`: RZZ couplings are fixed at -pi/2;
+# RX angles are exported at the theta_h = 0 endpoint of the sweep.
+function _lowesa_tfi_theta(gate)
+    if gate.symbols == [:X]
+        return 0.0
+    elseif gate.symbols == [:Z, :Z]
+        return Float64(-pi / 2)
+    end
+    throw(ArgumentError("unsupported lowesa_tfi_127 gate symbols: $(gate.symbols)"))
 end
 
 function _ibm_eagle_tfi_theta(gate)
@@ -263,6 +306,67 @@ function rudolph_angle_grid(spec::BenchmarkSpec)
     count = Int(get(spec.metadata, "angle_count", 20))
     count > 1 || throw(ArgumentError("angle_count must be greater than 1"))
     return collect(LinRange(start, stop, count))
+end
+
+# Read a two-column reference curve (`theta value` per line, `#` comments ignored).
+function _read_reference_curve(path::AbstractString)
+    isfile(path) || throw(ArgumentError("reference curve file not found: $path"))
+    thetas = Float64[]
+    values = Float64[]
+    for line in eachline(path)
+        stripped = strip(line)
+        (isempty(stripped) || startswith(stripped, "#")) && continue
+        fields = split(stripped)
+        length(fields) == 2 ||
+            throw(ArgumentError("reference curve line must have 2 fields: $line"))
+        push!(thetas, parse(Float64, fields[1]))
+        push!(values, parse(Float64, fields[2]))
+    end
+    isempty(thetas) && throw(ArgumentError("reference curve file is empty: $path"))
+    return thetas, values
+end
+
+"""
+    reference_curve_path(spec::BenchmarkSpec)
+
+Resolve the reference-curve file path declared under `[reference] file` in the config.
+"""
+function reference_curve_path(spec::BenchmarkSpec)
+    path = String(get(spec.reference, "file", ""))
+    isempty(path) && throw(ArgumentError("spec has no [reference] file entry"))
+    return path
+end
+
+"""
+    lowesa_reference_curve(spec::BenchmarkSpec)
+
+Return `(thetas, values)` of the IBM utility-paper exact reference curve for a
+`lowesa_tfi_127` spec.
+"""
+function lowesa_reference_curve(spec::BenchmarkSpec)
+    spec.family == "lowesa_tfi_127" ||
+        throw(ArgumentError("lowesa_reference_curve requires family = lowesa_tfi_127"))
+    return _read_reference_curve(reference_curve_path(spec))
+end
+
+"""
+    lowesa_angle_grid(spec::BenchmarkSpec)
+
+Return the theta_h sweep grid for a `lowesa_tfi_127` spec. The grid is taken from the
+IBM reference curve file so RMSE comparisons are point-to-point; if the file is absent
+it falls back to `LinRange(0, pi/2, angle_count)`.
+"""
+function lowesa_angle_grid(spec::BenchmarkSpec)
+    spec.family == "lowesa_tfi_127" ||
+        throw(ArgumentError("lowesa_angle_grid requires family = lowesa_tfi_127"))
+    path = String(get(spec.reference, "file", ""))
+    if !isempty(path) && isfile(path)
+        thetas, _ = _read_reference_curve(path)
+        return thetas
+    end
+    count = Int(get(spec.metadata, "angle_count", 158))
+    count > 1 || throw(ArgumentError("angle_count must be greater than 1"))
+    return collect(LinRange(0.0, pi / 2, count))
 end
 
 function circuit_description_dict(description::CircuitDescription)

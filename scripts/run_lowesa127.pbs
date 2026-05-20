@@ -1,0 +1,51 @@
+#!/bin/bash -l
+#PBS -q normal
+#PBS -P personal-kunsheng
+#PBS -N lowesa127
+#PBS -l select=1:ncpus=1:mem=400gb
+#PBS -l walltime=24:00:00
+#PBS -j oe
+
+# Single-core run of the LOWESA 127-qubit L=5 TFI magnetization sweep.
+# The sweep OOM-kills on a laptop; it needs the large-memory cluster node.
+# All backends in this project are benchmarked single-core for fair
+# cross-language comparison -- if the job runs out of walltime, raise
+# walltime (or split the two configs into separate jobs), never ncpus.
+#
+# Submit from the repository root:  qsub scripts/run_lowesa127.pbs
+
+set -euo pipefail
+
+cd "$PBS_O_WORKDIR"
+
+# Avoid "module: command not found" in non-interactive shells.
+[ -f /etc/bashrc ] && source /etc/bashrc
+
+module avail julia || true
+module load julia/1.11.5
+which julia
+julia --version
+
+# Drop any Julia env vars leaking from the login shell so this project's
+# --project=. environment is used verbatim.
+unset JULIA_PROJECT JULIA_LOAD_PATH JULIA_CPU_TARGET JULIA_SYSIMAGE
+
+# Pin every numeric library to a single thread -- true single-core.
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export VECLIB_MAXIMUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
+# Install + precompile dependencies. Manifest.toml is resolved under
+# Julia 1.11, matching the module loaded above.
+julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+
+# Validate the pipeline first (seconds) -- fail fast before the long run.
+make test
+make smoke
+
+# Full 127-qubit LOWESA sweep: Mz and Z62 configs.
+make benchmark-lowesa-127
+
+echo "DONE. results written to results/lowesa_tfi_127_L5_*.json"

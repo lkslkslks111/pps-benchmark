@@ -1,6 +1,6 @@
 JULIA = julia --project=.
 
-.PHONY: instantiate test smoke smoke-eagle reproduce-rudolph-eagle bench-small clean \
+.PHONY: instantiate test smoke smoke-eagle reproduce-rudolph-eagle benchmark-lowesa-127 bench-small clean \
 	build-rust smoke-rust test-rust
 
 instantiate:
@@ -104,6 +104,45 @@ test:
 		'sweep_dict = benchmark_sweep_result_dict(reduced_sweep)' \
 		'@assert length(sweep_dict["results"]) == 3' \
 		'@assert sweep_dict["metadata"]["reference_arxiv"] == "https://arxiv.org/abs/2505.21606"' \
+		'lowesa_spec = load_benchmark_spec("configs/lowesa_tfi_127_L5_mz.toml")' \
+		'@assert lowesa_spec.family == "lowesa_tfi_127"' \
+		'@assert lowesa_spec.nqubits == 127' \
+		'@assert lowesa_spec.nlayers == 5' \
+		'@assert lowesa_spec.observable == "Mz"' \
+		'lowesa_circuit = export_circuit(lowesa_spec)' \
+		'@assert lowesa_circuit.family == "lowesa_tfi_127"' \
+		'@assert length(lowesa_circuit.gates) == 1355' \
+		'@assert count(gate -> gate.paulis == ["X"], lowesa_circuit.gates) == 635' \
+		'@assert count(gate -> gate.paulis == ["Z", "Z"], lowesa_circuit.gates) == 720' \
+		'@assert count(gate -> gate.paulis == ["Z", "Z"] && isapprox(gate.theta, -pi / 2; atol=0.0, rtol=0.0), lowesa_circuit.gates) == 720' \
+		'@assert all(0 <= q < 127 for gate in lowesa_circuit.gates for q in gate.qubits)' \
+		'lowesa_angles = lowesa_angle_grid(lowesa_spec)' \
+		'@assert length(lowesa_angles) == 158' \
+		'@assert isapprox(first(lowesa_angles), 0.0; atol=0.0, rtol=0.0)' \
+		'surrogate_sweep = run_surrogate_sweep(backend, lowesa_spec; angle_indices=[1, 80, 158], max_freq=6, max_weight=4)' \
+		'@assert surrogate_sweep.backend == "julia_pauliprop"' \
+		'@assert surrogate_sweep.task_id == "lowesa_tfi_127_l5_mz_sweep"' \
+		'@assert surrogate_sweep.success' \
+		'@assert length(surrogate_sweep.results) == 3' \
+		'@assert all(point -> point.success, surrogate_sweep.results)' \
+		'@assert all(point -> isfinite(point.expectation), surrogate_sweep.results)' \
+		'@assert all(point -> isfinite(point.reference), surrogate_sweep.results)' \
+		'@assert all(point -> point.absolute_error >= 0, surrogate_sweep.results)' \
+		'@assert isapprox(surrogate_sweep.results[1].expectation, 1.0; atol=1.0e-6)' \
+		'@assert surrogate_sweep.metadata["num_paths_kept"] > 0' \
+		'@assert surrogate_sweep.metadata["num_paths_kept"] <= surrogate_sweep.metadata["num_paths_found"]' \
+		'@assert surrogate_sweep.metadata["build_time_sec"] >= 0' \
+		'@assert surrogate_sweep.metadata["eval_time_sec"] >= 0' \
+		'@assert surrogate_sweep.metadata["peak_rss_bytes"] > 0' \
+		'@assert isfinite(surrogate_sweep.metadata["rmse"])' \
+		'@assert surrogate_sweep.metadata["max_freq"] == 6' \
+		'@assert surrogate_sweep.metadata["max_weight"] == 4' \
+		'@assert surrogate_sweep.metadata["angle_count"] == 158' \
+		'@assert surrogate_sweep.metadata["evaluated_angle_count"] == 3' \
+		'surrogate_dict = benchmark_sweep_result_dict(surrogate_sweep)' \
+		'@assert length(surrogate_dict["results"]) == 3' \
+		'@assert haskey(surrogate_dict["results"][1], "reference")' \
+		'@assert haskey(surrogate_dict["results"][1], "absolute_error")' \
 		'println("temporary smoke tests passed")' \
 		> "$$tmp/runtests.jl"; \
 	PPS_TEST_TMP="$$tmp" $(JULIA) "$$tmp/runtests.jl"
@@ -116,6 +155,11 @@ smoke-eagle:
 
 reproduce-rudolph-eagle:
 	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend julia_pauliprop --config configs/reproduce_rudolph_eagle_127.toml
+
+benchmark-lowesa-127:
+	@mkdir -p results results/tmp
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend julia_pauliprop --config configs/lowesa_tfi_127_L5_mz.toml > results/tmp/lowesa_tfi_127_L5_mz.json && mv results/tmp/lowesa_tfi_127_L5_mz.json results/lowesa_tfi_127_L5_mz.json
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend julia_pauliprop --config configs/lowesa_tfi_127_L5_z62.toml > results/tmp/lowesa_tfi_127_L5_z62.json && mv results/tmp/lowesa_tfi_127_L5_z62.json results/lowesa_tfi_127_L5_z62.json
 
 bench-small:
 	$(JULIA) benchmarks/run_all.jl --config configs/bench_small.toml

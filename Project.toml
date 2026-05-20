@@ -10,4 +10,5 @@ PauliPropagation = "293282d5-3c99-4fb6-92d0-fd3280a19750"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 
 [compat]
-julia = "1.10"
+PauliPropagation = "=0.7.3"
+julia = "1.11"
