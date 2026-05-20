@@ -21,6 +21,10 @@ results/*.jsonl
 results/*.json
 logs/*.log
 
+# Raw third-party reference data (bulky; extracted curves are committed instead)
+reference/*.pdf
+reference/Evidence-for-the-utility-of-quantum-computing-before-fault-tolerance-mainfig/
+
 # System
 .DS_Store
 .vscode/settings.json

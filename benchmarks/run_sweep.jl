@@ -37,7 +37,11 @@ function main(args)
     parsed = _parse_args(args)
     backend = _make_backend(parsed["backend"])
     spec = load_benchmark_spec(parsed["config"])
-    result = run_sweep(backend, spec)
+    result = if spec.family == "lowesa_tfi_127"
+        run_surrogate_sweep(backend, spec)
+    else
+        run_sweep(backend, spec)
+    end
     println(JSON3.write(benchmark_sweep_result_dict(result)))
     return 0
 end
