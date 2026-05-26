@@ -34,6 +34,8 @@ function _make_backend(name::AbstractString)
         return RustPauliPropBackend()
     elseif name == "python_cuquantum"
         return PythonCuQuantumBackend()
+    elseif name == "python_bluequbit"
+        return PythonBlueQubitBackend()
     end
     throw(ArgumentError("unsupported backend: $name"))
 end

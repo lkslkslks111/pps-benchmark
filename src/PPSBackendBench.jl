@@ -5,6 +5,7 @@ include("backends/abstract.jl")
 include("backends/julia_pauliprop.jl")
 include("backends/rust_pauliprop.jl")
 include("backends/python_cuquantum.jl")
+include("backends/python_bluequbit.jl")
 
 export AbstractBackend,
     BenchmarkResult,
@@ -14,6 +15,7 @@ export AbstractBackend,
     CircuitDescription,
     CircuitGate,
     JuliaPauliPropBackend,
+    PythonBlueQubitBackend,
     PythonCuQuantumBackend,
     RustPauliPropBackend,
     backend_name,

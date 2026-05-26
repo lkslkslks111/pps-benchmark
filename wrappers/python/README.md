@@ -26,7 +26,7 @@ python3 <runner>.py --circuit <path/to/circuit.json> [--samples <n>]
 
 ## bluequbit_runner.py
 
-Pauli propagation via the [BlueQubit](https://bluequbit.io) cloud service.
+Calls the [BlueQubit](https://bluequbit.io) cloud pauli-path simulator.
 
 ### Requirements
 
@@ -40,17 +40,56 @@ An API token is required and must be supplied as an environment variable:
 export BLUEQUBIT_API_TOKEN="<your-token>"
 ```
 
-### Installation
+Install into the managed venv:
+```bash
+make build-bluequbit
+```
+
+### Usage
 
 ```bash
-pip install -r requirements_bluequbit.txt
+python3 wrappers/python/bluequbit_runner.py --circuit <circuit.json> [--samples <n>]
 ```
+
+### How it works
+
+1. Reads a `pps-circuit-v1` JSON file.
+2. Builds a Qiskit `QuantumCircuit` from the gate list.
+3. Converts the observable string (`Z0`, `Z62`, `Mz`) to a BlueQubit
+   `pauli_sum` list of `(pauli_string, coefficient)` tuples.
+4. Calls `bq_client.run(qc, device="pauli-path", pauli_sum=..., ...)`.
+5. Runs a second call with `pauli_path_truncation_threshold=0.0` for the
+   reference (exact) value.
+6. Prints a single JSON line on stdout conforming to the BenchmarkResult schema.
+
+### Qiskit qubit ordering
+
+Qiskit Pauli strings use reversed qubit order — qubit 0 is the rightmost
+character. The runner handles this conversion internally when building both
+the circuit gates and the `pauli_sum` observable strings.
+
+### Output schema notes
+
+| Field | Value |
+|---|---|
+| `backend` | `"python_bluequbit"` |
+| `final_terms` | `-1` (not exposed by the BlueQubit API) |
+| `memory_measure` | `"process_peak_rss"` |
+| `device` | `"pauli-path"` |
 
 ### Notes
 
 - Requires a live BlueQubit API token.
 - The runner exits with an error if `BLUEQUBIT_API_TOKEN` is not set.
 - All computation is performed on BlueQubit servers; no local GPU is required.
+
+### Makefile targets
+
+```bash
+make build-bluequbit    # create venv and install dependencies
+make smoke-bluequbit    # run a small end-to-end benchmark
+make test-bluequbit     # run Julia integration tests (requires API token)
+```
 
 ---
 

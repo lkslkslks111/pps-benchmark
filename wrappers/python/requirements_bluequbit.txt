@@ -1,0 +1,2 @@
+bluequbit
+qiskit

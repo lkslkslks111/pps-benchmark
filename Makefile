@@ -2,7 +2,8 @@ JULIA = julia --project=.
 
 .PHONY: instantiate test smoke smoke-eagle reproduce-rudolph-eagle benchmark-lowesa-127 bench-small clean \
 	build-rust smoke-rust test-rust \
-	build-cuquantum smoke-cuquantum test-cuquantum
+	build-cuquantum smoke-cuquantum test-cuquantum \
+	build-bluequbit smoke-bluequbit test-bluequbit
 
 instantiate:
 	$(JULIA) -e 'using Pkg; Pkg.instantiate()'
@@ -269,6 +270,57 @@ test-cuquantum: build-cuquantum
 		'missing_backend = PythonCuQuantumBackend(script_path="/nonexistent/cuquantum_runner.py")' \
 		'@test_throws ErrorException run_backend(missing_backend, spec)' \
 		'println("python_cuquantum comparison tests passed")' \
+		> "$$tmp/runtests.jl"; \
+	JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) "$$tmp/runtests.jl"
+
+wrappers/python/.venv/.installed.bluequbit: wrappers/python/requirements_bluequbit.txt
+	@test -d wrappers/python/.venv || python3 -m venv wrappers/python/.venv
+	@wrappers/python/.venv/bin/pip install -q --upgrade pip
+	@wrappers/python/.venv/bin/pip install -q -r wrappers/python/requirements_bluequbit.txt
+	@touch $@
+
+build-bluequbit: wrappers/python/.venv/.installed.bluequbit
+
+smoke-bluequbit: build-bluequbit
+	@out=$$(JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_backend.jl \
+		--backend python_bluequbit --config configs/bench_small.toml 2>&1); \
+	status=$$?; \
+	if [ $$status -eq 0 ]; then \
+		echo "$$out"; \
+	elif echo "$$out" | grep -qiE "BLUEQUBIT_API_TOKEN.*not set|API token.*not set|bluequbit not available|No module named.*bluequbit"; then \
+		echo "SKIP: python_bluequbit smoke skipped — BLUEQUBIT_API_TOKEN not set or bluequbit unavailable"; \
+		echo "$$out"; \
+	else \
+		echo "$$out"; \
+		exit $$status; \
+	fi
+
+test-bluequbit: build-bluequbit
+	@tmp=$$(mktemp -d /tmp/pps-benchmark-bluequbit-test.XXXXXX); \
+	trap 'rm -rf "$$tmp"' EXIT; \
+	printf '%s\n' \
+		'using PPSBackendBench' \
+		'using Test' \
+		'spec = load_benchmark_spec("configs/bench_small.toml")' \
+		'julia_backend = JuliaPauliPropBackend(samples=2, evals=1)' \
+		'bq_backend = PythonBlueQubitBackend(samples=1)' \
+		'julia_result = run_backend(julia_backend, spec)' \
+		'bq_result = run_backend(bq_backend, spec)' \
+		'@assert bq_result.backend == "python_bluequbit"' \
+		'@assert bq_result.task_id == julia_result.task_id' \
+		'@assert bq_result.success' \
+		'@assert bq_result.runtime_sec >= 0' \
+		'@assert bq_result.memory_bytes >= 0' \
+		'@assert isfinite(bq_result.expectation)' \
+		'@assert isfinite(bq_result.reference)' \
+		'@assert bq_result.absolute_error >= 0' \
+		'@assert isapprox(bq_result.expectation, julia_result.expectation; atol=1e-4, rtol=0)' \
+		'@assert bq_result.metadata["engine"] == "bluequbit"' \
+		'@assert haskey(bq_result.metadata, "bluequbit_version")' \
+		'@assert bq_result.metadata["circuit_schema_version"] == "pps-circuit-v1"' \
+		'missing_backend = PythonBlueQubitBackend(script_path="/nonexistent/bluequbit_runner.py")' \
+		'@test_throws ErrorException run_backend(missing_backend, spec)' \
+		'println("python_bluequbit comparison tests passed")' \
 		> "$$tmp/runtests.jl"; \
 	JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) "$$tmp/runtests.jl"
 
