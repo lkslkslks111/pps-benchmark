@@ -1,7 +1,8 @@
 JULIA = julia --project=.
 
 .PHONY: instantiate test smoke smoke-eagle reproduce-rudolph-eagle benchmark-lowesa-127 bench-small clean \
-	build-rust smoke-rust test-rust
+	build-rust smoke-rust test-rust \
+	build-cuquantum smoke-cuquantum test-cuquantum
 
 instantiate:
 	$(JULIA) -e 'using Pkg; Pkg.instantiate()'
@@ -226,6 +227,48 @@ test-rust: build-rust
 		'@assert haskey(rust_mixed.metadata, "thread_limits")' \
 		'@assert rust_mixed.metadata["thread_limits"]["OMP_NUM_THREADS"] == "1"' \
 		'println("rust_pauliprop comparison tests passed")' \
+		> "$$tmp/runtests.jl"; \
+	JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) "$$tmp/runtests.jl"
+
+wrappers/python/.venv/.installed.cuquantum: wrappers/python/requirements_cuquantum.txt
+	@test -d wrappers/python/.venv || python3 -m venv wrappers/python/.venv
+	@wrappers/python/.venv/bin/pip install -q --upgrade pip
+	@wrappers/python/.venv/bin/pip install -q -r wrappers/python/requirements_cuquantum.txt
+	@touch $@
+
+build-cuquantum: wrappers/python/.venv/.installed.cuquantum
+
+smoke-cuquantum: build-cuquantum
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_backend.jl \
+		--backend python_cuquantum --config configs/bench_small.toml
+
+test-cuquantum: build-cuquantum
+	@tmp=$$(mktemp -d /tmp/pps-benchmark-cuquantum-test.XXXXXX); \
+	trap 'rm -rf "$$tmp"' EXIT; \
+	printf '%s\n' \
+		'using PPSBackendBench' \
+		'using Test' \
+		'spec = load_benchmark_spec("configs/bench_small.toml")' \
+		'julia_backend = JuliaPauliPropBackend(samples=2, evals=1)' \
+		'cuq_backend = PythonCuQuantumBackend(samples=1)' \
+		'julia_result = run_backend(julia_backend, spec)' \
+		'cuq_result = run_backend(cuq_backend, spec)' \
+		'@assert cuq_result.backend == "python_cuquantum"' \
+		'@assert cuq_result.task_id == julia_result.task_id' \
+		'@assert cuq_result.success' \
+		'@assert cuq_result.final_terms >= 0' \
+		'@assert cuq_result.runtime_sec >= 0' \
+		'@assert cuq_result.memory_bytes >= 0' \
+		'@assert isfinite(cuq_result.expectation)' \
+		'@assert isfinite(cuq_result.reference)' \
+		'@assert cuq_result.absolute_error >= 0' \
+		'@assert isapprox(cuq_result.expectation, julia_result.expectation; atol=1e-6, rtol=0)' \
+		'@assert cuq_result.metadata["engine"] == "cuquantum_pauliprop"' \
+		'@assert haskey(cuq_result.metadata, "cuquantum_version")' \
+		'@assert cuq_result.metadata["circuit_schema_version"] == "pps-circuit-v1"' \
+		'missing_backend = PythonCuQuantumBackend(script_path="/nonexistent/cuquantum_runner.py")' \
+		'@test_throws ErrorException run_backend(missing_backend, spec)' \
+		'println("python_cuquantum comparison tests passed")' \
 		> "$$tmp/runtests.jl"; \
 	JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) "$$tmp/runtests.jl"
 
