@@ -3,7 +3,8 @@ JULIA = julia --project=.
 .PHONY: instantiate test smoke smoke-eagle reproduce-rudolph-eagle benchmark-lowesa-127 bench-small clean \
 	build-rust smoke-rust test-rust \
 	build-cuquantum smoke-cuquantum test-cuquantum \
-	build-cuda smoke-cuda test-cuda
+	build-cuda smoke-cuda test-cuda \
+	build-cpp smoke-cpp test-cpp
 
 instantiate:
 	$(JULIA) -e 'using Pkg; Pkg.instantiate()'
@@ -322,6 +323,48 @@ test-cuda: build-cuda
 		'missing_backend = CudaCuPauliPropBackend(script_path="/nonexistent/runner.py")' \
 		'@test_throws ErrorException run_backend(missing_backend, spec)' \
 		'println("cuda_cupauliprop comparison tests passed")' \
+		> "$$tmp/runtests.jl"; \
+	JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) "$$tmp/runtests.jl"
+
+wrappers/cpp/.venv/.installed: wrappers/cpp/requirements.txt
+	@test -d wrappers/cpp/.venv || python3 -m venv wrappers/cpp/.venv
+	@wrappers/cpp/.venv/bin/pip install -q --upgrade pip
+	@wrappers/cpp/.venv/bin/pip install -q -r wrappers/cpp/requirements.txt 2>/dev/null || true
+	@touch $@
+
+build-cpp: wrappers/cpp/.venv/.installed
+
+smoke-cpp: build-cpp
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_backend.jl \
+		--backend cpp_pauliengine --config configs/bench_small.toml
+
+test-cpp: build-cpp
+	@tmp=$$(mktemp -d /tmp/pps-benchmark-cpp-test.XXXXXX); \
+	trap 'rm -rf "$$tmp"' EXIT; \
+	printf '%s\n' \
+		'using PPSBackendBench' \
+		'using Test' \
+		'spec = load_benchmark_spec("configs/bench_small.toml")' \
+		'julia_backend = JuliaPauliPropBackend(samples=2, evals=1)' \
+		'cpp_backend = CppPauliEngineBackend(samples=1)' \
+		'julia_result = run_backend(julia_backend, spec)' \
+		'cpp_result = run_backend(cpp_backend, spec)' \
+		'@assert cpp_result.backend == "cpp_pauliengine"' \
+		'@assert cpp_result.task_id == julia_result.task_id' \
+		'@assert cpp_result.success' \
+		'@assert cpp_result.final_terms > 0' \
+		'@assert cpp_result.runtime_sec >= 0' \
+		'@assert cpp_result.memory_bytes >= 0' \
+		'@assert isfinite(cpp_result.expectation)' \
+		'@assert isfinite(cpp_result.reference)' \
+		'@assert cpp_result.absolute_error >= 0' \
+		'@assert isapprox(cpp_result.expectation, julia_result.expectation; atol=1e-6, rtol=0)' \
+		'@assert cpp_result.metadata["engine"] == "pauliengine"' \
+		'@assert haskey(cpp_result.metadata, "pauliengine_version")' \
+		'@assert cpp_result.metadata["circuit_schema_version"] == "pps-circuit-v1"' \
+		'missing_backend = CppPauliEngineBackend(script_path="/nonexistent/pauliengine_runner.py")' \
+		'@test_throws ErrorException run_backend(missing_backend, spec)' \
+		'println("cpp_pauliengine comparison tests passed")' \
 		> "$$tmp/runtests.jl"; \
 	JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) "$$tmp/runtests.jl"
 

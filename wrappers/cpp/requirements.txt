@@ -1,0 +1,4 @@
+# pauliengine is optional: the runner falls back to a built-in pure Python
+# Pauli-propagation engine when the C++ extension is not installed.
+# Uncomment and install when the package becomes available:
+# pauliengine
