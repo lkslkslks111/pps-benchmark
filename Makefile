@@ -2,7 +2,8 @@ JULIA = julia --project=.
 
 .PHONY: instantiate test smoke smoke-eagle reproduce-rudolph-eagle benchmark-lowesa-127 bench-small clean \
 	build-rust smoke-rust test-rust \
-	build-cuquantum smoke-cuquantum test-cuquantum
+	build-cuquantum smoke-cuquantum test-cuquantum \
+	build-cuda smoke-cuda test-cuda
 
 instantiate:
 	$(JULIA) -e 'using Pkg; Pkg.instantiate()'
@@ -269,6 +270,58 @@ test-cuquantum: build-cuquantum
 		'missing_backend = PythonCuQuantumBackend(script_path="/nonexistent/cuquantum_runner.py")' \
 		'@test_throws ErrorException run_backend(missing_backend, spec)' \
 		'println("python_cuquantum comparison tests passed")' \
+		> "$$tmp/runtests.jl"; \
+	JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) "$$tmp/runtests.jl"
+
+wrappers/cuda/.venv/.installed: wrappers/cuda/requirements.txt
+	@test -d wrappers/cuda/.venv || python3 -m venv wrappers/cuda/.venv
+	@wrappers/cuda/.venv/bin/pip install -q --upgrade pip
+	@wrappers/cuda/.venv/bin/pip install -q -r wrappers/cuda/requirements.txt
+	@touch $@
+
+build-cuda: wrappers/cuda/.venv/.installed
+
+smoke-cuda: build-cuda
+	@out=$$(JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_backend.jl \
+		--backend cuda_cupauliprop --config configs/bench_small.toml 2>&1); \
+	status=$$?; \
+	if [ $$status -eq 0 ]; then \
+		echo "$$out"; \
+	elif echo "$$out" | grep -qiE "cuquantum not available|No module named 'cuquantum|No module named cuquantum"; then \
+		echo "SKIP: cuda_cupauliprop smoke skipped — cuquantum not installed"; \
+		echo "$$out"; \
+	else \
+		echo "$$out"; \
+		exit $$status; \
+	fi
+
+test-cuda: build-cuda
+	@tmp=$$(mktemp -d /tmp/pps-benchmark-cuda-test.XXXXXX); \
+	trap 'rm -rf "$$tmp"' EXIT; \
+	printf '%s\n' \
+		'using PPSBackendBench' \
+		'using Test' \
+		'spec = load_benchmark_spec("configs/bench_small.toml")' \
+		'julia_backend = JuliaPauliPropBackend(samples=2, evals=1)' \
+		'cuda_backend = CudaCuPauliPropBackend(samples=1)' \
+		'julia_result = run_backend(julia_backend, spec)' \
+		'cuda_result = run_backend(cuda_backend, spec)' \
+		'@assert cuda_result.backend == "cuda_cupauliprop"' \
+		'@assert cuda_result.task_id == julia_result.task_id' \
+		'@assert cuda_result.success' \
+		'@assert cuda_result.final_terms > 0' \
+		'@assert cuda_result.runtime_sec >= 0' \
+		'@assert cuda_result.memory_bytes >= 0' \
+		'@assert isfinite(cuda_result.expectation)' \
+		'@assert isfinite(cuda_result.reference)' \
+		'@assert cuda_result.absolute_error >= 0' \
+		'@assert isapprox(cuda_result.expectation, julia_result.expectation; atol=1e-6, rtol=0)' \
+		'@assert cuda_result.metadata["engine"] == "cupauliprop"' \
+		'@assert haskey(cuda_result.metadata, "cuquantum_version")' \
+		'@assert cuda_result.metadata["circuit_schema_version"] == "pps-circuit-v1"' \
+		'missing_backend = CudaCuPauliPropBackend(script_path="/nonexistent/runner.py")' \
+		'@test_throws ErrorException run_backend(missing_backend, spec)' \
+		'println("cuda_cupauliprop comparison tests passed")' \
 		> "$$tmp/runtests.jl"; \
 	JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) "$$tmp/runtests.jl"
 
