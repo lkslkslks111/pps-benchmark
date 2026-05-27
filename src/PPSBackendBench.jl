@@ -6,6 +6,7 @@ include("backends/julia_pauliprop.jl")
 include("backends/rust_pauliprop.jl")
 include("backends/python_cuquantum.jl")
 include("backends/cuda_cupauliprop.jl")
+include("backends/cpp_pauliengine.jl")
 
 export AbstractBackend,
     BenchmarkResult,
@@ -14,6 +15,7 @@ export AbstractBackend,
     BenchmarkSweepResult,
     CircuitDescription,
     CircuitGate,
+    CppPauliEngineBackend,
     CudaCuPauliPropBackend,
     JuliaPauliPropBackend,
     PythonCuQuantumBackend,

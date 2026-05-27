@@ -36,6 +36,8 @@ function _make_backend(name::AbstractString)
         return PythonCuQuantumBackend()
     elseif name == "cuda_cupauliprop"
         return CudaCuPauliPropBackend()
+    elseif name == "cpp_pauliengine"
+        return CppPauliEngineBackend()
     end
     throw(ArgumentError("unsupported backend: $name"))
 end
