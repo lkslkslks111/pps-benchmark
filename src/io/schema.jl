@@ -369,6 +369,20 @@ function lowesa_angle_grid(spec::BenchmarkSpec)
     return collect(LinRange(0.0, pi / 2, count))
 end
 
+function export_circuit_at_angle(spec::BenchmarkSpec, theta_h::Float64)
+    spec.family == "lowesa_tfi_127" ||
+        throw(ArgumentError("export_circuit_at_angle requires family = lowesa_tfi_127"))
+    desc = export_circuit(spec)
+    gates = map(desc.gates) do gate
+        gate.paulis == ["X"] ? CircuitGate(gate.type, gate.paulis, gate.qubits, theta_h) : gate
+    end
+    return CircuitDescription(
+        desc.schema_version, desc.task_id, desc.family, desc.seed,
+        desc.nqubits, desc.observable, desc.truncation, desc.reference,
+        gates, desc.metadata,
+    )
+end
+
 function circuit_description_dict(description::CircuitDescription)
     return Dict{String,Any}(
         "schema_version" => description.schema_version,

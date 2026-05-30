@@ -76,6 +76,14 @@ function run_backend(
     end
 end
 
+function run_backend_sweep(
+    backend::RustPauliPropBackend,
+    spec::BenchmarkSpec;
+    angle_indices=nothing,
+)
+    return run_external_backend_sweep(backend, spec; angle_indices=angle_indices)
+end
+
 _to_int(x::Integer) = Int(x)
 _to_int(x::AbstractFloat) = Int(round(x))
 

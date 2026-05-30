@@ -438,6 +438,16 @@ function _parse_observable(nqubits::Int, observable::AbstractString)
     return PauliString(nqubits, symbol, qind)
 end
 
+function run_backend_sweep(
+    backend::JuliaPauliPropBackend,
+    spec::BenchmarkSpec;
+    angle_indices=nothing,
+    max_freq=nothing,
+    max_weight=nothing,
+)
+    return run_surrogate_sweep(backend, spec; angle_indices=angle_indices, max_freq=max_freq, max_weight=max_weight)
+end
+
 function _threshold(spec::BenchmarkSpec)
     return _threshold(spec.truncation)
 end
