@@ -5,7 +5,8 @@ JULIA = julia --project=.
 	build-cuquantum smoke-cuquantum test-cuquantum smoke-lowesa-127-cuquantum benchmark-lowesa-127-cuquantum \
 	build-cuda smoke-cuda test-cuda smoke-lowesa-127-cuda benchmark-lowesa-127-cuda \
 	build-cpp smoke-cpp test-cpp smoke-lowesa-127-cpp benchmark-lowesa-127-cpp \
-	benchmark-lowesa-127-all
+	benchmark-lowesa-127-all \
+	remote-submit remote-collect remote-validate
 
 instantiate:
 	$(JULIA) -e 'using Pkg; Pkg.instantiate()'
@@ -432,3 +433,35 @@ benchmark-lowesa-127-all: benchmark-lowesa-127 benchmark-lowesa-127-rust benchma
 clean:
 	rm -rf results/tmp/*
 	rm -rf logs/tmp/*
+
+# ── Remote verification pipeline ─────────────────────────────────────────────
+# Usage:
+#   make remote-submit  CLUSTER=<host> [REMOTE_PATH=~/pps-benchmark]
+#   make remote-collect CLUSTER=<host> [REMOTE_PATH=~/pps-benchmark]
+#   make remote-validate                [RESULTS_DIR=results/remote]
+#
+# Workflow:
+#   1. remote-submit  — ssh to cluster, git pull, qsub run_lowesa127_all.pbs
+#   2. (wait for PBS job to finish — check with: ssh CLUSTER qstat)
+#   3. remote-collect — rsync results/ and logs/ back from cluster
+#   4. remote-validate — compare all backend results against reference thresholds
+
+CLUSTER     ?=
+REMOTE_PATH ?= ~/pps-benchmark
+RESULTS_DIR ?= results/remote
+
+remote-submit:
+	@test -n "$(CLUSTER)" || (echo "Usage: make remote-submit CLUSTER=<host> [REMOTE_PATH=<path>]" && exit 1)
+	ssh $(CLUSTER) "cd $(REMOTE_PATH) && git pull && mkdir -p results logs && qsub scripts/run_lowesa127_all.pbs" \
+	    | tee logs/remote_jobs.txt
+	@echo "Job ID recorded in logs/remote_jobs.txt"
+	@echo "Monitor with: ssh $(CLUSTER) qstat"
+
+remote-collect:
+	@test -n "$(CLUSTER)" || (echo "Usage: make remote-collect CLUSTER=<host> [REMOTE_PATH=<path>]" && exit 1)
+	mkdir -p results/remote logs/remote
+	rsync -av $(CLUSTER):$(REMOTE_PATH)/results/ results/remote/
+	rsync -av $(CLUSTER):$(REMOTE_PATH)/logs/ logs/remote/
+
+remote-validate:
+	python3 scripts/validate_lowesa127.py --results-dir $(RESULTS_DIR)
