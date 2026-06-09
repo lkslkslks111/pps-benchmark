@@ -376,9 +376,22 @@ function export_circuit_at_angle(spec::BenchmarkSpec, theta_h::Float64)
     gates = map(desc.gates) do gate
         gate.paulis == ["X"] ? CircuitGate(gate.type, gate.paulis, gate.qubits, theta_h) : gate
     end
+    # External backends (rust/cpp/cuda) do exact Pauli propagation with a
+    # coefficient-threshold truncation, not the Julia-only `lowesa_surrogate`
+    # frequency/weight surrogate. Export a `threshold`-method truncation so the
+    # rust parser accepts it and every external backend truncates by coefficient.
+    # Cutoff = `external_coeff_threshold` from [truncation] (default 1e-8). This
+    # key is deliberately distinct from any key the Julia surrogate reads
+    # (max_freq/max_weight) so it never affects the Julia reference run; raise it
+    # if an external backend blows up on term count / memory at 127 qubits.
+    coeff_threshold = Float64(get(spec.truncation, "external_coeff_threshold", 1e-8))
+    external_truncation = Dict{String,Any}(
+        "method" => "threshold",
+        "threshold" => coeff_threshold,
+    )
     return CircuitDescription(
         desc.schema_version, desc.task_id, desc.family, desc.seed,
-        desc.nqubits, desc.observable, desc.truncation, desc.reference,
+        desc.nqubits, desc.observable, external_truncation, desc.reference,
         gates, desc.metadata,
     )
 end

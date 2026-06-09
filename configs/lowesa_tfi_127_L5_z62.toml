@@ -12,6 +12,11 @@ observable = "Z62"
 method = "lowesa_surrogate"
 max_freq = 40
 max_weight = 8
+# Optional: coefficient cutoff for the EXTERNAL backends only (rust/cpp/cuda),
+# which do exact threshold-truncated propagation rather than the Julia surrogate.
+# Defaults to 1e-8 in export_circuit_at_angle; uncomment + raise if a backend
+# blows up on terms/memory at 127 qubits. The Julia surrogate ignores this key.
+# external_coeff_threshold = 1.0e-8
 
 [reference]
 enabled = true
