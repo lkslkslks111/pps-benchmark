@@ -163,19 +163,22 @@ def extract_expectation_zero(expansion: PauliExpansion) -> float:
 # Propagation
 # ---------------------------------------------------------------------------
 
-def propagate(circuit: dict, threshold: float = 1e-8):
+def propagate(circuit: dict, threshold: float = 1e-8, weight_cutoff=None):
     """Run Heisenberg-picture Pauli propagation with cuPauliProp.
 
-    Returns (expectation, final_terms).
+    Returns (expectation, final_terms, peak_terms, terms_history).
     """
     nqubits = circuit["nqubits"]
     handle = LibraryHandle()
 
-    # Build truncation: None means no truncation (threshold=0.0 case)
-    if threshold == 0.0:
-        truncation = None
-    else:
-        truncation = Truncation(pauli_coeff_cutoff=threshold)
+    # Build truncation: cuPauliProp supports coefficient and Pauli-weight
+    # cutoffs, individually or combined. None means no truncation at all.
+    trunc_kwargs = {}
+    if threshold > 0.0:
+        trunc_kwargs["pauli_coeff_cutoff"] = threshold
+    if weight_cutoff is not None:
+        trunc_kwargs["pauli_weight_cutoff"] = int(weight_cutoff)
+    truncation = Truncation(**trunc_kwargs) if trunc_kwargs else None
 
     # Initialize with observable (build on CPU then move to GPU)
     obs_terms = parse_observable(nqubits, circuit["observable"])
@@ -183,14 +186,19 @@ def propagate(circuit: dict, threshold: float = 1e-8):
     expansion = expansion.to("gpu", package="cupy")
 
     # Apply gates in reverse (Heisenberg picture)
+    peak_terms = int(expansion.num_terms)
+    terms_history = []
     for gate in reversed(circuit["gates"]):
         pauli_str = gate_to_pauli_string(gate, nqubits)
         rot_gate = PauliRotationGate(angle=gate["theta"], pauli_string=pauli_str)
         expansion = expansion.apply_gate(rot_gate, truncation=truncation)
+        nterms = int(expansion.num_terms)
+        terms_history.append(nterms)
+        peak_terms = max(peak_terms, nterms)
 
     expectation = extract_expectation_zero(expansion)
     final_terms = int(expansion.num_terms)
-    return expectation, final_terms
+    return expectation, final_terms, peak_terms, terms_history
 
 
 # ---------------------------------------------------------------------------
@@ -218,9 +226,12 @@ def main():
         sys.exit(1)
 
     nqubits = circuit.get("nqubits", 0)
+    trunc_cfg = circuit.get("truncation", {})
     truncation_threshold = float(
-        circuit.get("truncation", {}).get("threshold", 1e-8)
+        trunc_cfg.get("coefficient_threshold", trunc_cfg.get("threshold", 1e-8))
     )
+    raw_weight = trunc_cfg.get("pauli_weight_cutoff")
+    weight_cutoff = int(raw_weight) if raw_weight is not None else None
 
     # NOTE: no separate exact (threshold=0) reference run. At 127 qubits the
     # untruncated propagation OOMs the GPU, and the LOWESA sweep supplies its
@@ -232,11 +243,15 @@ def main():
     runtimes = []
     expectation_val = None
     final_terms_val = None
+    peak_terms_val = None
+    terms_history_val = []
 
     for i in range(args.samples):
         t0 = time.perf_counter()
         try:
-            exp, ft = propagate(circuit, threshold=truncation_threshold)
+            exp, ft, pk, th = propagate(
+                circuit, threshold=truncation_threshold, weight_cutoff=weight_cutoff
+            )
         except Exception as e:
             print(f"ERROR: propagation sample {i} failed: {e}", file=sys.stderr)
             sys.exit(1)
@@ -244,12 +259,15 @@ def main():
         runtimes.append(t1 - t0)
         expectation_val = exp
         final_terms_val = ft
+        peak_terms_val = pk
+        terms_history_val = th
 
     reference_val = expectation_val
     median_time = statistics.median(runtimes)
     memory_bytes = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
 
     absolute_error = abs(expectation_val - reference_val)
+    throughput = final_terms_val / median_time if median_time > 0 else None
 
     result = {
         "backend": "cuda_cupauliprop",
@@ -258,6 +276,8 @@ def main():
         "runtime_sec": median_time,
         "memory_bytes": memory_bytes,
         "final_terms": final_terms_val,
+        "peak_terms": peak_terms_val,
+        "throughput_terms_per_sec": throughput,
         "expectation": expectation_val,
         "reference": reference_val,
         "absolute_error": absolute_error,
@@ -265,6 +285,15 @@ def main():
             "engine": "cupauliprop",
             "cuquantum_version": _CUQUANTUM_VERSION,
             "truncation_threshold": truncation_threshold,
+            "truncation_applied": {
+                "method": "threshold",
+                "coefficient_threshold": truncation_threshold,
+                "pauli_weight_cutoff": weight_cutoff,
+                "max_terms": None,
+                "max_freq": None,
+                "max_weight": None,
+            },
+            "terms_history": terms_history_val,
             "circuit_schema_version": circuit.get("schema_version", "pps-circuit-v1"),
             "nqubits": nqubits,
             "circuit_size": len(circuit.get("gates", [])),

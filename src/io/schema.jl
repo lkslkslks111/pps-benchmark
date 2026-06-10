@@ -25,6 +25,11 @@ struct BenchmarkResult
     runtime_sec::Float64
     memory_bytes::Int
     final_terms::Int
+    # Maximum Pauli-term count observed at any point during propagation;
+    # `nothing` when the engine cannot expose intermediate counts.
+    peak_terms::Union{Int,Nothing}
+    # final_terms / runtime_sec; `nothing` when runtime is zero or unknown.
+    throughput_terms_per_sec::Union{Float64,Nothing}
     expectation::Float64
     reference::Float64
     absolute_error::Float64
@@ -105,6 +110,8 @@ function benchmark_result_dict(result::BenchmarkResult)
         "runtime_sec" => result.runtime_sec,
         "memory_bytes" => result.memory_bytes,
         "final_terms" => result.final_terms,
+        "peak_terms" => result.peak_terms,
+        "throughput_terms_per_sec" => result.throughput_terms_per_sec,
         "expectation" => result.expectation,
         "reference" => result.reference,
         "absolute_error" => result.absolute_error,
@@ -388,7 +395,18 @@ function export_circuit_at_angle(spec::BenchmarkSpec, theta_h::Float64)
     external_truncation = Dict{String,Any}(
         "method" => "threshold",
         "threshold" => coeff_threshold,
+        "coefficient_threshold" => coeff_threshold,
     )
+    # Optional per-backend truncation knobs for external engines: `max_terms`
+    # (rust pauli-prop top-K) and `pauli_weight_cutoff` (cuda cuPauliProp /
+    # cpp weight filter). Backends ignore knobs they don't implement.
+    if haskey(spec.truncation, "external_max_terms")
+        external_truncation["max_terms"] = Int(spec.truncation["external_max_terms"])
+    end
+    if haskey(spec.truncation, "external_pauli_weight_cutoff")
+        external_truncation["pauli_weight_cutoff"] =
+            Int(spec.truncation["external_pauli_weight_cutoff"])
+    end
     return CircuitDescription(
         desc.schema_version, desc.task_id, desc.family, desc.seed,
         desc.nqubits, desc.observable, external_truncation, desc.reference,

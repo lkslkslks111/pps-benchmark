@@ -125,6 +125,125 @@ def pauli_dict_key(d: dict) -> tuple:
 
 
 # ---------------------------------------------------------------------------
+# PauliEngine-backed propagation (used when the C++ extension is installed)
+# ---------------------------------------------------------------------------
+#
+# PauliEngine encodes a Pauli string as packed bit words (64 qubits per word):
+#   X -> (x=1, y=0), Y -> (x=0, y=1), Z -> (x=1, y=1), I -> (0, 0)
+# so  all-Z  <=>  x == y  per word, weight = popcount(x | y), and two strings
+# anticommute iff parity(popcount(ax & by) + popcount(ay & bx)) is odd.
+# The C++ core performs the Pauli products (phase tracking included); this
+# loop owns gate ordering, term merging, and truncation.
+
+
+def _pe_anticommutes(ax, ay, bx, by) -> bool:
+    parity = 0
+    for i in range(max(len(ax), len(bx))):
+        awx = ax[i] if i < len(ax) else 0
+        awy = ay[i] if i < len(ay) else 0
+        bwx = bx[i] if i < len(bx) else 0
+        bwy = by[i] if i < len(by) else 0
+        parity ^= ((awx & bwy).bit_count() ^ (awy & bwx).bit_count()) & 1
+    return parity == 1
+
+
+def _pe_weight(ps) -> int:
+    return sum((wx | wy).bit_count() for wx, wy in zip(ps.x, ps.y))
+
+
+def _pe_is_all_z(ps) -> bool:
+    return ps.x == ps.y
+
+
+def propagate_pauliengine(
+    initial_terms: list[tuple[dict, complex]],
+    gates: list[dict],
+    threshold: float,
+    max_weight: int | None = None,
+):
+    """Heisenberg-picture propagation on PauliEngine C++ Pauli strings.
+
+    Same algorithm and truncation semantics as the pure-Python `propagate`;
+    returns (list_of_PauliStringComplex, peak_terms, terms_history).
+    """
+    state: dict = {}
+    for pd, coeff in initial_terms:
+        ps = _pe.PauliString(complex(coeff), {q: p for q, p in pd.items() if p != "I"})
+        if max_weight is not None and _pe_weight(ps) > max_weight:
+            continue
+        key = (tuple(ps.x), tuple(ps.y))
+        if key in state:
+            state[key].set_coeff(state[key].coeff + ps.coeff)
+        else:
+            state[key] = ps
+
+    peak_terms = len(state)
+    terms_history: list[int] = []
+
+    for gate in gates[::-1]:
+        gate_ps = _pe.PauliString(
+            1.0,
+            {
+                gate["qubits"][i]: gate["paulis"][i]
+                for i in range(len(gate["paulis"]))
+                if gate["paulis"][i] != "I"
+            },
+        )
+        gx, gy = tuple(gate_ps.x), tuple(gate_ps.y)
+        cos_t = math.cos(gate["theta"])
+        isin_t = 1j * math.sin(gate["theta"])
+
+        new_state: dict = {}
+        for key, ps in state.items():
+            if not _pe_anticommutes(gx, gy, key[0], key[1]):
+                if key in new_state:
+                    new_state[key].set_coeff(new_state[key].coeff + ps.coeff)
+                else:
+                    new_state[key] = ps
+                continue
+
+            # sin branch first: the product must see the original coefficient.
+            # prod.coeff = pauli_phase * ps.coeff, so c2 = prod.coeff * i*sin.
+            prod = gate_ps * ps
+            c2 = prod.coeff * isin_t
+
+            # cos branch: same Pauli word, scaled coefficient
+            c1 = ps.coeff * cos_t
+            if abs(c1) >= threshold:
+                if key in new_state:
+                    new_state[key].set_coeff(new_state[key].coeff + c1)
+                else:
+                    ps.set_coeff(c1)
+                    new_state[key] = ps
+
+            if abs(c2) >= threshold:
+                if max_weight is None or _pe_weight(prod) <= max_weight:
+                    pkey = (tuple(prod.x), tuple(prod.y))
+                    if pkey in new_state:
+                        new_state[pkey].set_coeff(new_state[pkey].coeff + c2)
+                    else:
+                        prod.set_coeff(c2)
+                        new_state[pkey] = prod
+
+        if threshold > 0.0:
+            state = {
+                k: v for k, v in new_state.items() if abs(v.coeff) >= threshold
+            }
+        else:
+            state = new_state
+
+        terms_history.append(len(state))
+        peak_terms = max(peak_terms, len(state))
+
+    return list(state.values()), peak_terms, terms_history
+
+
+def compute_expectation_pauliengine(terms) -> float:
+    """<0..0|O|0..0> = sum of real coefficients of all-Z PauliEngine terms."""
+    return sum(ps.coeff.real for ps in terms if _pe_is_all_z(ps))
+
+
+# ---------------------------------------------------------------------------
 # Observable parsing
 # ---------------------------------------------------------------------------
 
@@ -148,12 +267,22 @@ def parse_observable(obs_str: str, nqubits: int) -> list[tuple[dict, complex]]:
 # Propagation core
 # ---------------------------------------------------------------------------
 
+def pauli_weight(pd: dict) -> int:
+    """Number of non-identity single-qubit Paulis in a Pauli dict."""
+    return sum(1 for p in pd.values() if p != "I")
+
+
 def propagate(
     initial_terms: list[tuple[dict, complex]],
     gates: list[dict],
     threshold: float,
-) -> list[tuple[dict, complex]]:
+    max_weight: int | None = None,
+) -> tuple[list[tuple[dict, complex]], int, list[int]]:
     """Heisenberg-picture Pauli propagation.
+
+    Returns (final_terms, peak_terms, terms_history): peak_terms is the
+    largest term count observed after any gate application, terms_history the
+    per-gate term counts in application (Heisenberg) order.
 
     Walk gates in reverse order.  For each gate:
       - gate Pauli K_dict built from gate['paulis'] and gate['qubits']
@@ -164,16 +293,22 @@ def propagate(
           else (anticommutes):
             -> (pauli_dict, coeff * cos(theta))
             -> (K*pauli, coeff * 1j * sin(theta))
-    Truncate |coeff| < threshold.  Merge duplicate Pauli strings.
+    Truncate |coeff| < threshold and Pauli weight > max_weight.
+    Merge duplicate Pauli strings.
     """
     # Represent as dict: key -> coeff
     term_map: dict[tuple, tuple[dict, complex]] = {}
     for pd, coeff in initial_terms:
+        if max_weight is not None and pauli_weight(pd) > max_weight:
+            continue
         k = pauli_dict_key(pd)
         if k in term_map:
             term_map[k] = (pd, term_map[k][1] + coeff)
         else:
             term_map[k] = (pd, coeff)
+
+    peak_terms = len(term_map)
+    terms_history: list[int] = []
 
     for gate in reversed(gates):
         paulis = gate["paulis"]
@@ -206,13 +341,14 @@ def propagate(
                 phase, kpd = multiply_pauli_strings(k_dict, pd)
                 c2 = coeff * 1j * sin_t * phase
                 if abs(c2) >= threshold:
-                    k2 = pauli_dict_key(kpd)
-                    if k2 in new_map:
-                        new_map[k2] = (kpd, new_map[k2][1] + c2)
-                    else:
-                        new_map[k2] = (kpd, c2)
+                    if max_weight is None or pauli_weight(kpd) <= max_weight:
+                        k2 = pauli_dict_key(kpd)
+                        if k2 in new_map:
+                            new_map[k2] = (kpd, new_map[k2][1] + c2)
+                        else:
+                            new_map[k2] = (kpd, c2)
 
-        # Truncate
+        # Truncate by coefficient
         if threshold > 0.0:
             term_map = {
                 k: v for k, v in new_map.items() if abs(v[1]) >= threshold
@@ -220,7 +356,10 @@ def propagate(
         else:
             term_map = new_map
 
-    return list(term_map.values())
+        terms_history.append(len(term_map))
+        peak_terms = max(peak_terms, len(term_map))
+
+    return list(term_map.values()), peak_terms, terms_history
 
 
 def compute_expectation(terms: list[tuple[dict, complex]]) -> float:
@@ -260,7 +399,11 @@ def run_benchmark(circuit_path: str, samples: int) -> dict:
     family: str = circuit.get("family", "unknown")
 
     trunc_cfg = circuit.get("truncation", {})
-    threshold: float = float(trunc_cfg.get("threshold", 1e-8))
+    threshold: float = float(
+        trunc_cfg.get("coefficient_threshold", trunc_cfg.get("threshold", 1e-8))
+    )
+    raw_weight = trunc_cfg.get("pauli_weight_cutoff")
+    max_weight: int | None = int(raw_weight) if raw_weight is not None else None
 
     initial_terms = parse_observable(obs_str, nqubits)
 
@@ -269,13 +412,24 @@ def run_benchmark(circuit_path: str, samples: int) -> dict:
     final_terms_count = 0
     expectation = 0.0
 
+    peak_terms = 0
+    terms_history: list[int] = []
+    if _PAULIENGINE_AVAILABLE:
+        propagate_fn = propagate_pauliengine
+        expectation_fn = compute_expectation_pauliengine
+    else:
+        propagate_fn = propagate
+        expectation_fn = compute_expectation
+
     for _ in range(samples):
         t0 = time.perf_counter()
-        result_terms = propagate(initial_terms, gates, threshold)
+        result_terms, peak_terms, terms_history = propagate_fn(
+            initial_terms, gates, threshold, max_weight
+        )
         t1 = time.perf_counter()
         runtimes.append(t1 - t0)
         final_terms_count = len(result_terms)
-        expectation = compute_expectation(result_terms)
+        expectation = expectation_fn(result_terms)
 
     runtimes.sort()
     median_idx = (len(runtimes) - 1) // 2
@@ -287,14 +441,16 @@ def run_benchmark(circuit_path: str, samples: int) -> dict:
 
     mem_bytes = peak_rss_bytes()
 
-    # --- Reference (exact propagation, threshold=0.0) ---
-    if threshold == 0.0:
+    # --- Reference (exact propagation: no coefficient or weight truncation) ---
+    if threshold == 0.0 and max_weight is None:
         reference = expectation
         absolute_error = 0.0
     else:
-        ref_terms = propagate(initial_terms, gates, 0.0)
-        reference = compute_expectation(ref_terms)
+        ref_terms, _, _ = propagate_fn(initial_terms, gates, 0.0)
+        reference = expectation_fn(ref_terms)
         absolute_error = abs(expectation - reference)
+
+    throughput = final_terms_count / runtime_sec if runtime_sec > 0 else None
 
     return {
         "backend": "cpp_pauliengine",
@@ -303,6 +459,8 @@ def run_benchmark(circuit_path: str, samples: int) -> dict:
         "runtime_sec": runtime_sec,
         "memory_bytes": mem_bytes,
         "final_terms": final_terms_count,
+        "peak_terms": peak_terms,
+        "throughput_terms_per_sec": throughput,
         "expectation": expectation,
         "reference": reference,
         "absolute_error": absolute_error,
@@ -310,6 +468,15 @@ def run_benchmark(circuit_path: str, samples: int) -> dict:
             "engine": "pauliengine",
             "pauliengine_version": _PAULIENGINE_VERSION,
             "truncation_threshold": threshold,
+            "truncation_applied": {
+                "method": "threshold",
+                "coefficient_threshold": threshold,
+                "pauli_weight_cutoff": max_weight,
+                "max_terms": None,
+                "max_freq": None,
+                "max_weight": None,
+            },
+            "terms_history": terms_history,
             "circuit_schema_version": circuit.get("schema_version", "pps-circuit-v1"),
             "nqubits": nqubits,
             "circuit_size": len(gates),

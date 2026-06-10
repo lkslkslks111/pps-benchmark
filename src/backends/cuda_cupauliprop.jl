@@ -73,6 +73,8 @@ function run_backend(
             Float64(parsed["runtime_sec"]),
             _cuda_to_int(parsed["memory_bytes"]),
             _cuda_to_int(parsed["final_terms"]),
+            _optional_int(get(parsed, "peak_terms", nothing)),
+            _optional_float(get(parsed, "throughput_terms_per_sec", nothing)),
             Float64(parsed["expectation"]),
             Float64(parsed["reference"]),
             Float64(parsed["absolute_error"]),

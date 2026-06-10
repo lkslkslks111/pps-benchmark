@@ -4,7 +4,7 @@ struct CppPauliEngineBackend <: AbstractBackend
     samples::Int
 
     function CppPauliEngineBackend(;
-        python_cmd::AbstractString="python3",
+        python_cmd::AbstractString=_default_cpp_python_cmd(),
         script_path::AbstractString=_default_cpp_script_path(),
         samples::Int=1,
     )
@@ -20,6 +20,13 @@ const _CPP_SCRIPT_RELATIVE_PATH = joinpath("wrappers", "cpp", "pauliengine_runne
 # `@__DIR__` is `<repo>/src/backends`; walk up two levels to the repo root.
 function _default_cpp_script_path()
     return abspath(joinpath(@__DIR__, "..", "..", _CPP_SCRIPT_RELATIVE_PATH))
+end
+
+# Prefer the bundled venv python (created by `make build-cpp`) so that the
+# C++ pauliengine extension is available without a system-wide installation.
+function _default_cpp_python_cmd()
+    venv_python = abspath(joinpath(@__DIR__, "..", "..", "wrappers", "cpp", ".venv", "bin", "python3"))
+    return isfile(venv_python) ? venv_python : "python3"
 end
 
 function run_backend(backend::CppPauliEngineBackend, spec::BenchmarkSpec)
@@ -68,6 +75,8 @@ function run_backend(
             Float64(parsed["runtime_sec"]),
             _to_cpp_int(parsed["memory_bytes"]),
             _to_cpp_int(parsed["final_terms"]),
+            _optional_int(get(parsed, "peak_terms", nothing)),
+            _optional_float(get(parsed, "throughput_terms_per_sec", nothing)),
             Float64(parsed["expectation"]),
             Float64(parsed["reference"]),
             Float64(parsed["absolute_error"]),

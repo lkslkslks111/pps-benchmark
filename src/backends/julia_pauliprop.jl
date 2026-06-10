@@ -244,6 +244,9 @@ function run_surrogate_sweep(
             "evaluated_angle_count" => length(points),
             "max_freq" => ℓ,
             "max_weight" => weight,
+            "truncation_applied" => _truncation_applied(;
+                method="lowesa_surrogate", max_freq=ℓ, max_weight=weight,
+            ),
             "circuit_size" => length(circuit),
             "parameter_count" => nparams,
             "build_time_sec" => build_time_sec,
@@ -317,7 +320,10 @@ function _run_pauliprop_task(
     metadata_extra::Dict{String,Any},
 )
     threshold = _threshold(truncation)
-    threshold_run = () -> propagate(circuit, observable, thetas; min_abs_coeff=threshold)
+    raw_weight = get(truncation, "pauli_weight_cutoff", nothing)
+    weight_cutoff = raw_weight === nothing ? nothing : Int(raw_weight)
+    threshold_run =
+        () -> _propagate_truncated(circuit, observable, thetas, threshold, weight_cutoff)
 
     samples = backend.samples
     evals = backend.evals
@@ -325,10 +331,19 @@ function _run_pauliprop_task(
     threshold_result = threshold_run()
     exact_result = propagate(circuit, observable, thetas; min_abs_coeff=0.0)
 
+    # Separate instrumented gate-by-gate run for the peak term count and the
+    # per-gate term-count history, so the timed runs above stay free of
+    # per-gate bookkeeping overhead.
+    peak_terms, terms_history =
+        _propagate_peak_terms(circuit, observable, thetas, threshold, weight_cutoff)
+
     expectation = Float64(real(overlapwithzero(threshold_result)))
     reference = Float64(real(overlapwithzero(exact_result)))
     med = median(trial)
     min_est = minimum(trial)
+    runtime_sec = Float64(med.time) / 1.0e9
+    final_terms = length(threshold_result.terms)
+    throughput = runtime_sec > 0 ? Float64(final_terms) / runtime_sec : nothing
 
     metadata = Dict{String,Any}(
         "benchmark_samples" => backend.samples,
@@ -340,6 +355,11 @@ function _run_pauliprop_task(
         "circuit_size" => length(circuit),
         "parameter_count" => length(thetas),
         "truncation_threshold" => threshold,
+        "truncation_applied" => _truncation_applied(;
+            method="threshold", coefficient_threshold=threshold,
+            pauli_weight_cutoff=weight_cutoff,
+        ),
+        "terms_history" => terms_history,
         "observable" => String(observable_label),
     )
     merge!(metadata, metadata_extra)
@@ -348,14 +368,50 @@ function _run_pauliprop_task(
         backend_name(backend),
         String(task_id),
         true,
-        Float64(med.time) / 1.0e9,
+        runtime_sec,
         Int(med.memory),
-        length(threshold_result.terms),
+        final_terms,
+        peak_terms,
+        throughput,
         expectation,
         reference,
         abs(expectation - reference),
         metadata,
     )
+end
+
+# `propagate` with an optional Pauli-weight cutoff (PauliPropagation's
+# `max_weight`); avoids passing a `nothing` keyword when the knob is unused.
+function _propagate_truncated(circuit, observable, thetas, threshold, weight_cutoff)
+    weight_cutoff === nothing &&
+        return propagate(circuit, observable, thetas; min_abs_coeff=threshold)
+    return propagate(
+        circuit, observable, thetas;
+        min_abs_coeff=threshold, max_weight=weight_cutoff,
+    )
+end
+
+# Re-propagate gate by gate (Heisenberg order: last gate first) recording the
+# Pauli-term count after every gate. PauliPropagation truncates after each gate
+# internally, so the stepwise result matches the single-call `propagate`.
+# Returns (peak, history) where history[k] is the term count after the k-th
+# applied gate.
+function _propagate_peak_terms(circuit, observable, thetas, threshold, weight_cutoff)
+    psum = observable
+    peak = 0
+    history = Int[]
+    idx = length(thetas)
+    for i in reverse(eachindex(circuit))
+        gate = circuit[i]
+        n = countparameters([gate])
+        gate_thetas = n == 0 ? Float64[] : thetas[(idx - n + 1):idx]
+        idx -= n
+        psum = _propagate_truncated([gate], psum, gate_thetas, threshold, weight_cutoff)
+        nterms = length(psum.terms)
+        push!(history, nterms)
+        peak = max(peak, nterms)
+    end
+    return peak, history
 end
 
 function _run_pauliprop_sweep_point(
@@ -455,5 +511,28 @@ end
 function _threshold(truncation::Dict{String,Any})
     method = get(truncation, "method", "")
     method == "threshold" || throw(ArgumentError("unsupported truncation method: $method"))
+    # Unified key `coefficient_threshold` preferred; legacy `threshold` accepted.
+    haskey(truncation, "coefficient_threshold") &&
+        return Float64(truncation["coefficient_threshold"])
     return Float64(truncation["threshold"])
+end
+
+# Structured record of the truncation actually applied by this run; embedded in
+# result metadata so downstream comparison tooling never has to re-derive it.
+function _truncation_applied(;
+    method::AbstractString,
+    coefficient_threshold=nothing,
+    max_terms=nothing,
+    pauli_weight_cutoff=nothing,
+    max_freq=nothing,
+    max_weight=nothing,
+)
+    return Dict{String,Any}(
+        "method" => String(method),
+        "coefficient_threshold" => coefficient_threshold,
+        "max_terms" => max_terms,
+        "pauli_weight_cutoff" => pauli_weight_cutoff,
+        "max_freq" => max_freq,
+        "max_weight" => max_weight,
+    )
 end

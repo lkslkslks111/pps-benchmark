@@ -92,6 +92,8 @@ pub fn validate(description: &CircuitDescription) -> Result<(), String> {
 }
 
 /// Extract the truncation threshold. Phase 1 supports only `method = "threshold"`.
+/// Reads the unified `coefficient_threshold` key first, falling back to the
+/// legacy `threshold` key.
 pub fn truncation_threshold(description: &CircuitDescription) -> Result<f64, String> {
     let method = description
         .truncation
@@ -103,9 +105,23 @@ pub fn truncation_threshold(description: &CircuitDescription) -> Result<f64, Str
     }
     description
         .truncation
-        .get("threshold")
+        .get("coefficient_threshold")
+        .or_else(|| description.truncation.get("threshold"))
         .and_then(Value::as_f64)
         .ok_or_else(|| "truncation.threshold must be a number".to_string())
+}
+
+/// Extract the optional `max_terms` (top-K) truncation knob. `None` means no
+/// term-count cap (the pauli-prop default behaviour).
+pub fn truncation_max_terms(description: &CircuitDescription) -> Result<Option<i64>, String> {
+    match description.truncation.get("max_terms") {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => value
+            .as_i64()
+            .filter(|&n| n > 0)
+            .map(Some)
+            .ok_or_else(|| "truncation.max_terms must be a positive integer".to_string()),
+    }
 }
 
 /// Parse a single-qubit observable label such as `"Z0"` into its Pauli symbol
