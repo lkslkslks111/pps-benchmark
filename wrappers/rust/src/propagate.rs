@@ -41,8 +41,9 @@ pub struct PropagationOutcome {
     pub qiskit_version: String,
 }
 
-/// Propagate the observable through the circuit, timing `samples` truncated
-/// runs and one exact (`atol = 0`) reference run.
+/// Propagate the observable through the circuit, timing `samples`
+/// coefficient-truncated runs. No exact reference run (it is intractable at
+/// 127 qubits); the LOWESA sweep supplies the reference curve separately.
 pub fn propagate(
     description: &CircuitDescription,
     samples: usize,
@@ -89,13 +90,11 @@ fn run_in_py(
     let (expectation, final_terms): (f64, i64) =
         summarize.call1((truncated.get_item(0)?,))?.extract()?;
 
-    // Exact reference run — no truncation.
-    let observable = build_observable(py, symbol, index, description.nqubits)?;
-    let exact = propagate_fn.call(
-        (observable, qc.clone()),
-        Some(&propagation_kwargs(py, 0.0)?),
-    )?;
-    let (reference, _): (f64, i64) = summarize.call1((exact.get_item(0)?,))?.extract()?;
+    // No separate exact (threshold = 0) reference run: at 127 qubits the
+    // untruncated propagation explodes, and the LOWESA sweep supplies its own
+    // reference curve at the sweep level. Report the coefficient-truncated value
+    // as the reference too (absolute_error = 0 here; real error comes from the sweep).
+    let reference = expectation;
 
     durations.sort_by(|a, b| a.partial_cmp(b).expect("durations are finite"));
 

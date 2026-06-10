@@ -1,1 +1,4 @@
-cuquantum-cu12
+# cuquantum-python provides the importable `cuquantum` module (Python API).
+# The bare `cuquantum-cu12` package ships only the C libraries (cuStateVec/
+# cuTensorNet) with no Python bindings, so `import cuquantum` fails.
+cuquantum-python

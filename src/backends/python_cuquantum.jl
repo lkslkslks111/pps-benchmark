@@ -4,7 +4,7 @@ struct PythonCuQuantumBackend <: AbstractBackend
     samples::Int
 
     function PythonCuQuantumBackend(;
-        python_cmd::AbstractString="python3",
+        python_cmd::AbstractString=_default_cuquantum_python_cmd(),
         script_path::AbstractString=_default_cuquantum_script_path(),
         samples::Int=1,
     )
@@ -17,6 +17,16 @@ backend_name(::PythonCuQuantumBackend) = "python_cuquantum"
 
 function _default_cuquantum_script_path()
     return abspath(joinpath(@__DIR__, "..", "..", "wrappers", "python", "cuquantum_runner.py"))
+end
+
+# Prefer the bundled venv python (created by `make build-cuquantum`) so that
+# cuquantum is available without requiring a system-wide installation. Mirrors
+# the cuda backend's `_default_cuda_python_cmd`. Without this the runner is
+# launched with the system/module python3, which lacks cuquantum and fails with
+# "No module named 'cuquantum'".
+function _default_cuquantum_python_cmd()
+    venv_python = abspath(joinpath(@__DIR__, "..", "..", "wrappers", "python", ".venv", "bin", "python3"))
+    return isfile(venv_python) ? venv_python : "python3"
 end
 
 function run_backend(backend::PythonCuQuantumBackend, spec::BenchmarkSpec)
@@ -73,6 +83,14 @@ function run_backend(
     finally
         isfile(tmp_path) && rm(tmp_path; force=true)
     end
+end
+
+function run_backend_sweep(
+    backend::PythonCuQuantumBackend,
+    spec::BenchmarkSpec;
+    angle_indices=nothing,
+)
+    return run_external_backend_sweep(backend, spec; angle_indices=angle_indices)
 end
 
 _cuq_to_int(x::Integer) = Int(x)

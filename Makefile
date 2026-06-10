@@ -1,10 +1,12 @@
 JULIA = julia --project=.
 
 .PHONY: instantiate test smoke smoke-eagle reproduce-rudolph-eagle benchmark-lowesa-127 bench-small clean \
-	build-rust smoke-rust test-rust \
-	build-cuquantum smoke-cuquantum test-cuquantum \
-	build-cuda smoke-cuda test-cuda \
-	build-cpp smoke-cpp test-cpp
+	build-rust smoke-rust test-rust smoke-lowesa-127-rust benchmark-lowesa-127-rust \
+	build-cuquantum smoke-cuquantum test-cuquantum smoke-lowesa-127-cuquantum benchmark-lowesa-127-cuquantum \
+	build-cuda smoke-cuda test-cuda smoke-lowesa-127-cuda benchmark-lowesa-127-cuda \
+	build-cpp smoke-cpp test-cpp smoke-lowesa-127-cpp benchmark-lowesa-127-cpp \
+	benchmark-lowesa-127-all \
+	remote-submit remote-collect remote-validate
 
 instantiate:
 	$(JULIA) -e 'using Pkg; Pkg.instantiate()'
@@ -146,6 +148,19 @@ test:
 		'@assert length(surrogate_dict["results"]) == 3' \
 		'@assert haskey(surrogate_dict["results"][1], "reference")' \
 		'@assert haskey(surrogate_dict["results"][1], "absolute_error")' \
+		'theta_h_test = pi / 4' \
+		'circuit_at_angle = export_circuit_at_angle(lowesa_spec, theta_h_test)' \
+		'@assert circuit_at_angle.family == "lowesa_tfi_127"' \
+		'@assert length(circuit_at_angle.gates) == 1355' \
+		'rx_gates = filter(g -> g.paulis == ["X"], circuit_at_angle.gates)' \
+		'rzz_gates = filter(g -> g.paulis == ["Z", "Z"], circuit_at_angle.gates)' \
+		'@assert all(isapprox(g.theta, theta_h_test; atol=0.0, rtol=0.0) for g in rx_gates)' \
+		'@assert all(isapprox(g.theta, -pi / 2; atol=0.0, rtol=0.0) for g in rzz_gates)' \
+		'sweep_via_alias = run_backend_sweep(backend, lowesa_spec; angle_indices=[1, 80, 158], max_freq=6, max_weight=4)' \
+		'@assert sweep_via_alias.backend == "julia_pauliprop"' \
+		'@assert sweep_via_alias.task_id == "lowesa_tfi_127_l5_mz_sweep"' \
+		'@assert length(sweep_via_alias.results) == 3' \
+		'@assert isapprox(sweep_via_alias.results[1].expectation, surrogate_sweep.results[1].expectation; atol=1e-12)' \
 		'println("temporary smoke tests passed")' \
 		> "$$tmp/runtests.jl"; \
 	PPS_TEST_TMP="$$tmp" $(JULIA) "$$tmp/runtests.jl"
@@ -179,6 +194,14 @@ build-rust: wrappers/rust/.venv/.installed
 
 smoke-rust: build-rust
 	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_backend.jl --backend rust_pauliprop --config configs/bench_small.toml
+
+smoke-lowesa-127-rust: build-rust
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_backend.jl --backend rust_pauliprop --config configs/lowesa_tfi_127_L5_mz.toml
+
+benchmark-lowesa-127-rust: build-rust
+	@mkdir -p results results/tmp
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend rust_pauliprop --config configs/lowesa_tfi_127_L5_mz.toml > results/tmp/rust_lowesa_tfi_127_L5_mz.json && mv results/tmp/rust_lowesa_tfi_127_L5_mz.json results/rust_lowesa_tfi_127_L5_mz.json
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend rust_pauliprop --config configs/lowesa_tfi_127_L5_z62.toml > results/tmp/rust_lowesa_tfi_127_L5_z62.json && mv results/tmp/rust_lowesa_tfi_127_L5_z62.json results/rust_lowesa_tfi_127_L5_z62.json
 
 test-rust: build-rust
 	@cargo test --manifest-path wrappers/rust/Cargo.toml --no-default-features --lib
@@ -244,6 +267,15 @@ smoke-cuquantum: build-cuquantum
 	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_backend.jl \
 		--backend python_cuquantum --config configs/bench_small.toml
 
+smoke-lowesa-127-cuquantum: build-cuquantum
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_backend.jl \
+		--backend python_cuquantum --config configs/lowesa_tfi_127_L5_mz.toml
+
+benchmark-lowesa-127-cuquantum: build-cuquantum
+	@mkdir -p results results/tmp
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend python_cuquantum --config configs/lowesa_tfi_127_L5_mz.toml > results/tmp/cuquantum_lowesa_tfi_127_L5_mz.json && mv results/tmp/cuquantum_lowesa_tfi_127_L5_mz.json results/cuquantum_lowesa_tfi_127_L5_mz.json
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend python_cuquantum --config configs/lowesa_tfi_127_L5_z62.toml > results/tmp/cuquantum_lowesa_tfi_127_L5_z62.json && mv results/tmp/cuquantum_lowesa_tfi_127_L5_z62.json results/cuquantum_lowesa_tfi_127_L5_z62.json
+
 test-cuquantum: build-cuquantum
 	@tmp=$$(mktemp -d /tmp/pps-benchmark-cuquantum-test.XXXXXX); \
 	trap 'rm -rf "$$tmp"' EXIT; \
@@ -285,6 +317,20 @@ build-cuda: wrappers/cuda/.venv/.installed
 smoke-cuda: build-cuda
 	@out=$$(JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_backend.jl \
 		--backend cuda_cupauliprop --config configs/bench_small.toml 2>&1); \
+	status=$$?; \
+	if [ $$status -eq 0 ]; then \
+		echo "$$out"; \
+	elif echo "$$out" | grep -qiE "cuquantum not available|No module named 'cuquantum|No module named cuquantum"; then \
+		echo "SKIP: cuda_cupauliprop smoke skipped — cuquantum not installed"; \
+		echo "$$out"; \
+	else \
+		echo "$$out"; \
+		exit $$status; \
+	fi
+
+smoke-lowesa-127-cuda: build-cuda
+	@out=$$(JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_backend.jl \
+		--backend cuda_cupauliprop --config configs/lowesa_tfi_127_L5_mz.toml 2>&1); \
 	status=$$?; \
 	if [ $$status -eq 0 ]; then \
 		echo "$$out"; \
@@ -338,6 +384,15 @@ smoke-cpp: build-cpp
 	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_backend.jl \
 		--backend cpp_pauliengine --config configs/bench_small.toml
 
+smoke-lowesa-127-cpp: build-cpp
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_backend.jl \
+		--backend cpp_pauliengine --config configs/lowesa_tfi_127_L5_mz.toml
+
+benchmark-lowesa-127-cpp: build-cpp
+	@mkdir -p results results/tmp
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend cpp_pauliengine --config configs/lowesa_tfi_127_L5_mz.toml > results/tmp/cpp_lowesa_tfi_127_L5_mz.json && mv results/tmp/cpp_lowesa_tfi_127_L5_mz.json results/cpp_lowesa_tfi_127_L5_mz.json
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend cpp_pauliengine --config configs/lowesa_tfi_127_L5_z62.toml > results/tmp/cpp_lowesa_tfi_127_L5_z62.json && mv results/tmp/cpp_lowesa_tfi_127_L5_z62.json results/cpp_lowesa_tfi_127_L5_z62.json
+
 test-cpp: build-cpp
 	@tmp=$$(mktemp -d /tmp/pps-benchmark-cpp-test.XXXXXX); \
 	trap 'rm -rf "$$tmp"' EXIT; \
@@ -368,6 +423,45 @@ test-cpp: build-cpp
 		> "$$tmp/runtests.jl"; \
 	JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) "$$tmp/runtests.jl"
 
+benchmark-lowesa-127-cuda: build-cuda
+	@mkdir -p results results/tmp
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend cuda_cupauliprop --config configs/lowesa_tfi_127_L5_mz.toml > results/tmp/cuda_lowesa_tfi_127_L5_mz.json && mv results/tmp/cuda_lowesa_tfi_127_L5_mz.json results/cuda_lowesa_tfi_127_L5_mz.json
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend cuda_cupauliprop --config configs/lowesa_tfi_127_L5_z62.toml > results/tmp/cuda_lowesa_tfi_127_L5_z62.json && mv results/tmp/cuda_lowesa_tfi_127_L5_z62.json results/cuda_lowesa_tfi_127_L5_z62.json
+
+benchmark-lowesa-127-all: benchmark-lowesa-127 benchmark-lowesa-127-rust benchmark-lowesa-127-cpp benchmark-lowesa-127-cuda benchmark-lowesa-127-cuquantum
+
 clean:
 	rm -rf results/tmp/*
 	rm -rf logs/tmp/*
+
+# ── Remote verification pipeline ─────────────────────────────────────────────
+# Usage:
+#   make remote-submit  CLUSTER=<host> [REMOTE_PATH=~/pps-benchmark]
+#   make remote-collect CLUSTER=<host> [REMOTE_PATH=~/pps-benchmark]
+#   make remote-validate                [RESULTS_DIR=results/remote]
+#
+# Workflow:
+#   1. remote-submit  — ssh to cluster, git pull, qsub run_lowesa127_all.pbs
+#   2. (wait for PBS job to finish — check with: ssh CLUSTER qstat)
+#   3. remote-collect — rsync results/ and logs/ back from cluster
+#   4. remote-validate — compare all backend results against reference thresholds
+
+CLUSTER     ?=
+REMOTE_PATH ?= ~/pps-benchmark
+RESULTS_DIR ?= results/remote
+
+remote-submit:
+	@test -n "$(CLUSTER)" || (echo "Usage: make remote-submit CLUSTER=<host> [REMOTE_PATH=<path>]" && exit 1)
+	ssh $(CLUSTER) "cd $(REMOTE_PATH) && git pull && mkdir -p results logs && qsub scripts/run_lowesa127_all.pbs" \
+	    | tee logs/remote_jobs.txt
+	@echo "Job ID recorded in logs/remote_jobs.txt"
+	@echo "Monitor with: ssh $(CLUSTER) qstat"
+
+remote-collect:
+	@test -n "$(CLUSTER)" || (echo "Usage: make remote-collect CLUSTER=<host> [REMOTE_PATH=<path>]" && exit 1)
+	mkdir -p results/remote logs/remote
+	rsync -av $(CLUSTER):$(REMOTE_PATH)/results/ results/remote/
+	rsync -av $(CLUSTER):$(REMOTE_PATH)/logs/ logs/remote/
+
+remote-validate:
+	python3 scripts/validate_lowesa127.py --results-dir $(RESULTS_DIR)

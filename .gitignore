@@ -28,6 +28,10 @@ logs/*.log
 reference/*.pdf
 reference/Evidence-for-the-utility-of-quantum-computing-before-fault-tolerance-mainfig/
 
+# PBS / cluster job scripts (site-specific: queue, project code, module versions;
+# kept out of version control and copied to the cluster manually)
+*.pbs
+
 # System
 .DS_Store
 .vscode/settings.json

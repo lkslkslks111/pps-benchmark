@@ -29,6 +29,14 @@ end
 function _make_backend(name::AbstractString)
     if name == "julia_pauliprop"
         return JuliaPauliPropBackend(samples=1, evals=1)
+    elseif name == "rust_pauliprop"
+        return RustPauliPropBackend(samples=1)
+    elseif name == "python_cuquantum"
+        return PythonCuQuantumBackend(samples=1)
+    elseif name == "cuda_cupauliprop"
+        return CudaCuPauliPropBackend(samples=1)
+    elseif name == "cpp_pauliengine"
+        return CppPauliEngineBackend(samples=1)
     end
     throw(ArgumentError("unsupported backend: $name"))
 end
@@ -38,7 +46,7 @@ function main(args)
     backend = _make_backend(parsed["backend"])
     spec = load_benchmark_spec(parsed["config"])
     result = if spec.family == "lowesa_tfi_127"
-        run_surrogate_sweep(backend, spec)
+        run_backend_sweep(backend, spec)
     else
         run_sweep(backend, spec)
     end
