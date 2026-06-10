@@ -1,5 +1,9 @@
 abstract type AbstractBackend end
 
+# Optional numeric fields from external runner JSON: absent or null -> nothing.
+_optional_int(x) = x === nothing ? nothing : Int(round(Float64(x)))
+_optional_float(x) = x === nothing ? nothing : Float64(x)
+
 function backend_name(backend::AbstractBackend)
     throw(MethodError(backend_name, (backend,)))
 end
@@ -41,6 +45,9 @@ function run_external_backend_sweep(
         angle = Float64(angles[angle_index])
         description = export_circuit_at_angle(spec, angle)
         result = run_backend(backend, description; circuit_source="lowesa_sweep_angle_$(angle_index)")
+        # Per-gate term-count histories are for single-run growth plots; at
+        # sweep scale (angles x gates) they would bloat the sweep JSON.
+        delete!(result.metadata, "terms_history")
 
         reference = has_reference ? Float64(reference_values[angle_index]) : NaN
         absolute_error = has_reference ? abs(result.expectation - reference) : NaN

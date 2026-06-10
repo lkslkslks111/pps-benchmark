@@ -1,6 +1,6 @@
 JULIA = julia --project=.
 
-.PHONY: instantiate test smoke smoke-eagle reproduce-rudolph-eagle benchmark-lowesa-127 bench-small clean \
+.PHONY: instantiate test smoke smoke-eagle reproduce-rudolph-eagle benchmark-lowesa-127 bench-small benchmark-medium clean \
 	build-rust smoke-rust test-rust smoke-lowesa-127-rust benchmark-lowesa-127-rust \
 	build-cuquantum smoke-cuquantum test-cuquantum smoke-lowesa-127-cuquantum benchmark-lowesa-127-cuquantum \
 	build-cuda smoke-cuda test-cuda smoke-lowesa-127-cuda benchmark-lowesa-127-cuda \
@@ -40,6 +40,14 @@ test:
 		'@assert result.final_terms > 0' \
 		'@assert result.runtime_sec >= 0' \
 		'@assert result.memory_bytes >= 0' \
+		'@assert result.peak_terms isa Int' \
+		'@assert result.peak_terms >= result.final_terms' \
+		'@assert result.throughput_terms_per_sec > 0' \
+		'@assert result.metadata["truncation_applied"]["method"] == "threshold"' \
+		'@assert result.metadata["truncation_applied"]["coefficient_threshold"] == 1.0e-8' \
+		'result_dict = benchmark_result_dict(result)' \
+		'@assert haskey(result_dict, "peak_terms")' \
+		'@assert haskey(result_dict, "throughput_terms_per_sec")' \
 		'@assert isfinite(result.expectation)' \
 		'@assert isfinite(result.reference)' \
 		'@assert result.absolute_error >= 0' \
@@ -182,6 +190,23 @@ benchmark-lowesa-127:
 bench-small:
 	$(JULIA) benchmarks/run_all.jl --config configs/bench_small.toml
 
+# Cross-backend medium benchmark: run every locally available backend on
+# configs/bench_medium.toml, then emit a comparison table + plots.
+# The CUDA leg is skipped (with a notice) when cuquantum is not installed.
+benchmark-medium: build-rust build-cpp
+	@mkdir -p results results/tmp
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_backend.jl --backend julia_pauliprop --config configs/bench_medium.toml > results/tmp/medium_julia.json && mv results/tmp/medium_julia.json results/medium_julia.json
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_backend.jl --backend rust_pauliprop --config configs/bench_medium.toml > results/tmp/medium_rust.json && mv results/tmp/medium_rust.json results/medium_rust.json
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_backend.jl --backend cpp_pauliengine --config configs/bench_medium.toml > results/tmp/medium_cpp.json && mv results/tmp/medium_cpp.json results/medium_cpp.json
+	@out=$$(JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_backend.jl --backend cuda_cupauliprop --config configs/bench_medium.toml 2>&1); \
+	if [ $$? -eq 0 ]; then \
+		echo "$$out" | tail -1 > results/tmp/medium_cuda.json && mv results/tmp/medium_cuda.json results/medium_cuda.json; \
+	else \
+		echo "SKIP: cuda_cupauliprop medium benchmark skipped (cuquantum unavailable)"; \
+		rm -f results/medium_cuda.json; \
+	fi
+	@python3 scripts/compare_backends.py --out-prefix results/comparison_medium results/medium_*.json
+
 wrappers/rust/.venv/.installed: wrappers/rust/requirements.txt
 	@test -d wrappers/rust/.venv || python3 -m venv wrappers/rust/.venv
 	@wrappers/rust/.venv/bin/pip install -q --upgrade pip
@@ -221,6 +246,9 @@ test-rust: build-rust
 		'@assert rust_result.final_terms > 0' \
 		'@assert rust_result.runtime_sec >= 0' \
 		'@assert rust_result.memory_bytes >= 0' \
+		'@assert rust_result.peak_terms === nothing' \
+		'@assert rust_result.throughput_terms_per_sec > 0' \
+		'@assert rust_result.metadata["truncation_applied"]["method"] == "threshold"' \
 		'@assert isfinite(rust_result.expectation)' \
 		'@assert isfinite(rust_result.reference)' \
 		'@assert rust_result.absolute_error >= 0' \
@@ -410,6 +438,10 @@ test-cpp: build-cpp
 		'@assert cpp_result.final_terms > 0' \
 		'@assert cpp_result.runtime_sec >= 0' \
 		'@assert cpp_result.memory_bytes >= 0' \
+		'@assert cpp_result.peak_terms isa Int' \
+		'@assert cpp_result.peak_terms >= cpp_result.final_terms' \
+		'@assert cpp_result.throughput_terms_per_sec > 0' \
+		'@assert cpp_result.metadata["truncation_applied"]["method"] == "threshold"' \
 		'@assert isfinite(cpp_result.expectation)' \
 		'@assert isfinite(cpp_result.reference)' \
 		'@assert cpp_result.absolute_error >= 0' \

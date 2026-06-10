@@ -12,8 +12,9 @@ use std::time::Instant;
 use rust_pauliprop::circuit::{self, CircuitDescription};
 use rust_pauliprop::gatemap::{classify, GateOp};
 
-/// No practical cap on the term count — truncation is driven by `atol`.
-const MAX_TERMS: i64 = 100_000_000;
+/// Default when no `max_terms` is configured: no practical cap on the term
+/// count — truncation is driven by `atol` alone.
+const MAX_TERMS_UNCAPPED: i64 = 100_000_000;
 
 /// Python helper: reduce an evolved `SparsePauliOp` to `<0|O|0>` (sum of the
 /// coefficients of fully diagonal Pauli terms) and report its term count.
@@ -37,6 +38,7 @@ pub struct PropagationOutcome {
     pub truncated_one_norm: f64,
     pub memory_bytes: i64,
     pub threshold: f64,
+    pub max_terms: Option<i64>,
     pub pauli_prop_version: String,
     pub qiskit_version: String,
 }
@@ -49,11 +51,12 @@ pub fn propagate(
     samples: usize,
 ) -> Result<PropagationOutcome, String> {
     let threshold = circuit::truncation_threshold(description)?;
+    let max_terms = circuit::truncation_max_terms(description)?;
     let (symbol, index) =
         circuit::parse_observable(&description.observable, description.nqubits)?;
 
     Python::with_gil(|py| {
-        run_in_py(py, description, samples, threshold, symbol, index)
+        run_in_py(py, description, samples, threshold, max_terms, symbol, index)
             .map_err(|e| format!("pauli_prop propagation failed: {e}"))
     })
 }
@@ -63,6 +66,7 @@ fn run_in_py(
     description: &CircuitDescription,
     samples: usize,
     threshold: f64,
+    max_terms: Option<i64>,
     symbol: char,
     index: i64,
 ) -> PyResult<PropagationOutcome> {
@@ -80,7 +84,7 @@ fn run_in_py(
         let started = Instant::now();
         let tuple = propagate_fn.call(
             (observable, qc.clone()),
-            Some(&propagation_kwargs(py, threshold)?),
+            Some(&propagation_kwargs(py, threshold, max_terms)?),
         )?;
         durations.push(started.elapsed().as_secs_f64());
         last = Some(tuple);
@@ -107,15 +111,20 @@ fn run_in_py(
         truncated_one_norm,
         memory_bytes: peak_rss_bytes(),
         threshold,
+        max_terms,
         pauli_prop_version: pip_version(py, "pauli-prop"),
         qiskit_version: version_of(py.import_bound("qiskit")?.as_any()),
     })
 }
 
 /// Keyword arguments for `propagate_through_circuit` (Heisenberg frame).
-fn propagation_kwargs(py: Python<'_>, atol: f64) -> PyResult<Bound<'_, PyDict>> {
+fn propagation_kwargs(
+    py: Python<'_>,
+    atol: f64,
+    max_terms: Option<i64>,
+) -> PyResult<Bound<'_, PyDict>> {
     let kwargs = PyDict::new_bound(py);
-    kwargs.set_item("max_terms", MAX_TERMS)?;
+    kwargs.set_item("max_terms", max_terms.unwrap_or(MAX_TERMS_UNCAPPED))?;
     kwargs.set_item("atol", atol)?;
     kwargs.set_item("frame", "h")?;
     Ok(kwargs)

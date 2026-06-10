@@ -1,0 +1,23 @@
+name = "bench_medium"
+seed = 7
+
+# Medium-size cross-backend comparison task. 10 qubits keeps the exact
+# (threshold = 0) reference propagation tractable (<= 4^10 ~ 1M Pauli terms)
+# while being large enough that backend runtime differences are visible.
+
+[task]
+task_id = "medium_clifford_rotation_n10_l8_seed7"
+family = "clifford_pauli_rotation"
+nqubits = 10
+nlayers = 8
+observable = "Z0"
+
+[truncation]
+method = "threshold"
+coefficient_threshold = 1.0e-7
+# Legacy key kept for older parsers; same value as coefficient_threshold.
+threshold = 1.0e-7
+
+[reference]
+enabled = true
+method = "exact_small"

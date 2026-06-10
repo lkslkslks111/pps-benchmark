@@ -17,6 +17,11 @@ pub struct BenchmarkResult {
     pub runtime_sec: f64,
     pub memory_bytes: i64,
     pub final_terms: i64,
+    /// Peak intermediate term count. `None`: pauli-prop propagates the whole
+    /// circuit in one opaque call, so intermediate counts are not observable.
+    pub peak_terms: Option<i64>,
+    /// final_terms / runtime_sec.
+    pub throughput_terms_per_sec: Option<f64>,
     pub expectation: f64,
     pub reference: f64,
     pub absolute_error: f64,
@@ -44,6 +49,8 @@ mod tests {
             runtime_sec: 0.0123,
             memory_bytes: 4096,
             final_terms: 7,
+            peak_terms: None,
+            throughput_terms_per_sec: Some(7.0 / 0.0123),
             expectation: 0.5,
             reference: 0.5,
             absolute_error: 0.0,
@@ -73,6 +80,8 @@ mod tests {
             "runtime_sec",
             "memory_bytes",
             "final_terms",
+            "peak_terms",
+            "throughput_terms_per_sec",
             "expectation",
             "reference",
             "absolute_error",

@@ -74,6 +74,17 @@ fn run() -> Result<String, String> {
         Value::from(outcome.threshold),
     );
     metadata.insert(
+        "truncation_applied".into(),
+        serde_json::json!({
+            "method": "threshold",
+            "coefficient_threshold": outcome.threshold,
+            "max_terms": outcome.max_terms,
+            "pauli_weight_cutoff": null,
+            "max_freq": null,
+            "max_weight": null,
+        }),
+    );
+    metadata.insert(
         "observable".into(),
         Value::from(description.observable.clone()),
     );
@@ -97,6 +108,12 @@ fn run() -> Result<String, String> {
         Value::from("process_peak_rss"),
     );
 
+    let throughput = if outcome.median_time_sec > 0.0 {
+        Some(outcome.final_terms as f64 / outcome.median_time_sec)
+    } else {
+        None
+    };
+
     let result = BenchmarkResult {
         backend: BACKEND_NAME.to_string(),
         task_id: description.task_id.clone(),
@@ -104,6 +121,10 @@ fn run() -> Result<String, String> {
         runtime_sec: outcome.median_time_sec,
         memory_bytes: outcome.memory_bytes,
         final_terms: outcome.final_terms,
+        // pauli-prop propagates the whole circuit in one opaque Python call;
+        // intermediate term counts are not observable from this runner.
+        peak_terms: None,
+        throughput_terms_per_sec: throughput,
         expectation: outcome.expectation,
         reference: outcome.reference,
         absolute_error: (outcome.expectation - outcome.reference).abs(),
