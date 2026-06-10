@@ -1,6 +1,6 @@
 JULIA = julia --project=.
 
-.PHONY: instantiate test smoke smoke-eagle reproduce-rudolph-eagle benchmark-lowesa-127 bench-small benchmark-medium clean \
+.PHONY: instantiate test smoke smoke-eagle reproduce-rudolph-eagle benchmark-lowesa-127 bench-small benchmark-medium benchmark-sweep-medium clean \
 	build-rust smoke-rust test-rust smoke-lowesa-127-rust benchmark-lowesa-127-rust \
 	build-cuquantum smoke-cuquantum test-cuquantum smoke-lowesa-127-cuquantum benchmark-lowesa-127-cuquantum \
 	build-cuda smoke-cuda test-cuda smoke-lowesa-127-cuda benchmark-lowesa-127-cuda \
@@ -222,6 +222,23 @@ benchmark-medium: build-rust build-cpp
 		rm -f results/medium_cuda.json; \
 	fi
 	@python3 scripts/compare_backends.py --out-prefix results/comparison_medium results/medium_*.json
+
+# Generic correlated-angle sweep across every locally available backend,
+# followed by the expectation-curve / per-point-runtime figure.
+# The CUDA leg is skipped (with a notice) when cuquantum is not installed.
+benchmark-sweep-medium: build-rust build-cpp
+	@mkdir -p results results/tmp
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend julia_pauliprop --config configs/sweep_medium.toml > results/tmp/sweep_medium_julia.json && mv results/tmp/sweep_medium_julia.json results/sweep_medium_julia.json
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend rust_pauliprop --config configs/sweep_medium.toml > results/tmp/sweep_medium_rust.json && mv results/tmp/sweep_medium_rust.json results/sweep_medium_rust.json
+	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend cpp_pauliengine --config configs/sweep_medium.toml > results/tmp/sweep_medium_cpp.json && mv results/tmp/sweep_medium_cpp.json results/sweep_medium_cpp.json
+	@out=$$(JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend cuda_cupauliprop --config configs/sweep_medium.toml 2>&1); \
+	if [ $$? -eq 0 ]; then \
+		echo "$$out" | tail -1 > results/tmp/sweep_medium_cuda.json && mv results/tmp/sweep_medium_cuda.json results/sweep_medium_cuda.json; \
+	else \
+		echo "SKIP: cuda_cupauliprop sweep skipped (cuquantum unavailable)"; \
+		rm -f results/sweep_medium_cuda.json; \
+	fi
+	@python3 scripts/plot_sweep.py results/sweep_medium_*.json --out-prefix results/sweep_medium
 
 wrappers/rust/.venv/.installed: wrappers/rust/requirements.txt
 	@test -d wrappers/rust/.venv || python3 -m venv wrappers/rust/.venv
