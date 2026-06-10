@@ -66,6 +66,18 @@ make benchmark-medium
 
 *Per-gate Pauli term growth on the 10-qubit task. The Julia, C++, and CUDA engines produce identical term counts after every gate — the curves overlap exactly — which doubles as a cross-engine correctness check.*
 
+### Parameter sweeps
+
+```bash
+make benchmark-sweep-medium
+```
+
+A correlated-angle sweep (every rotation angle = θ) across all backends. Structural truncations (weight/frequency) are parameter-independent, so the Julia backend builds its surrogate path graph **once** and re-evaluates only the coefficients per angle — external engines re-propagate the full circuit at every point:
+
+![Parameter sweep: expectation curves and per-point runtime](docs/figures/sweep_medium.png)
+
+All four engines trace the same expectation curve (left); the per-point cost (right) shows the build-once / evaluate-many advantage — surrogate evaluation is ~100x cheaper per angle than re-propagation.
+
 ### Accuracy / speed vs truncation threshold
 
 ```bash
