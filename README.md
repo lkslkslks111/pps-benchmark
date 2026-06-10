@@ -4,6 +4,22 @@
 
 The method is young, and independent implementations have appeared across language ecosystems — each with its own engine design, truncation knobs, and performance profile. **This repository is a cross-language benchmark for them**: the same task specification, the same circuit exchange format, the same result schema, run on Julia, Rust, C++, and CUDA engines and compared head-to-head.
 
+## Define once, run the whole matrix
+
+The core design advantage: **a circuit is defined once, then fans out automatically across engines and settings.**
+
+```
+one TOML spec ──► one pps-circuit-v1 JSON ──► every backend consumes the
+                                              identical circuit description
+        │
+        └─ truncation / sweep settings are config knobs, not code —
+           engine x truncation-variant x angle-grid matrices run from
+           a single definition, and results land in one schema that the
+           comparison scripts aggregate into tables and figures
+```
+
+No backend rebuilds the circuit from scratch (eliminating the classic benchmark pitfall of subtly different circuits per implementation), and adding a new setting to the comparison is a config edit, not a porting effort. One command — `make benchmark-medium`, `make benchmark-sweep-medium`, or `python3 scripts/compare_truncation_types.py` — runs the corresponding slice of the matrix end-to-end.
+
 ## How Pauli propagation works
 
 A Pauli observable (here `Z⊗Z⊗Z⊗Z⊗Z`) is pushed backwards through the circuit layer by layer. Gates that don't commute with a Pauli string **split** it into two — the operator branches into a growing tree of Pauli terms:
