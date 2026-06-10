@@ -1,19 +1,20 @@
 # PPS Backend Benchmark
 
-Cross-language benchmark for **Pauli propagation** engines: the same Heisenberg-picture simulation task, the same circuit exchange format, the same result schema — run on Julia, Rust, C++, and CUDA backends and compared head-to-head on runtime, memory, throughput, and accuracy under different truncation strategies.
+**Pauli propagation simulation (PPS)** is an emerging classical method for simulating quantum circuits: instead of evolving a state vector, it propagates the *observable* backwards through the circuit in the Heisenberg picture, keeping the operator as a sparse sum of Pauli strings and **truncating** the small or unimportant terms as it grows. With the right truncation it has reproduced 127-qubit quantum-utility-scale experiments on a laptop.
 
-![Pauli term growth per gate across backends and truncation variants](docs/figures/truncation_types_growth.png)
+The method is young, and independent implementations have appeared across language ecosystems — each with its own engine design, truncation knobs, and performance profile. **This repository is a cross-language benchmark for them**: the same task specification, the same circuit exchange format, the same result schema, run on Julia, Rust, C++, and CUDA engines and compared head-to-head.
 
-*Per-gate Pauli term growth on a 10-qubit benchmark circuit. The Julia, C++, and CUDA engines produce **identical** term counts after every gate — the curves overlap exactly — which doubles as a cross-engine correctness check.*
+## How Pauli propagation works
 
-## Why
+A Pauli observable (here `Z⊗Z⊗Z⊗Z⊗Z`) is pushed backwards through the circuit layer by layer. Gates that don't commute with a Pauli string **split** it into two — the operator branches into a growing tree of Pauli terms:
 
-Pauli propagation (sparse Heisenberg-picture simulation with truncation) has several independent implementations across language ecosystems. They differ in engine design, truncation knobs, and performance characteristics, but there has been no apples-to-apples comparison. This repository provides:
+![Pauli propagation: layer-wise branching of the observable](docs/figures/pauli_propagation_layerwise.gif)
 
-- a **single benchmark specification** (TOML) consumed by every backend,
-- a versioned **circuit exchange format** (`pps-circuit-v1` JSON) so no backend rebuilds circuits from scratch,
-- a **uniform result schema** with structured truncation records, peak term counts, and throughput,
-- **comparison tooling** that turns raw results into tables and figures.
+Left unchecked, the term count grows exponentially. **Truncation** is what makes the method practical: branches with small coefficients (or high Pauli weight) are pruned as they appear, keeping the tree sparse at a controlled accuracy cost:
+
+![Truncation: branches pruned during growth](docs/figures/pauli_truncation_demo.gif)
+
+Every engine in this benchmark implements this same propagate-and-truncate loop — what differs is the language, the data structures, and which truncation knobs are available. Regenerate these animations with `python3 scripts/plot.py` and `python3 scripts/truncation_demo.py`.
 
 ## Backends
 
@@ -59,6 +60,12 @@ make benchmark-medium
 
 ## Benchmark dimensions
 
+### Cross-engine agreement
+
+![Pauli term growth per gate across backends and truncation variants](docs/figures/truncation_types_growth.png)
+
+*Per-gate Pauli term growth on the 10-qubit task. The Julia, C++, and CUDA engines produce identical term counts after every gate — the curves overlap exactly — which doubles as a cross-engine correctness check.*
+
 ### Accuracy / speed vs truncation threshold
 
 ```bash
@@ -74,14 +81,6 @@ python3 scripts/compare_truncation_types.py
 ```
 
 ![Truncation type matrix](docs/figures/truncation_types.png)
-
-Findings from the 10-qubit task (coeff = 1e-7, weight ≤ 4, topK = 4096):
-
-- **Weight truncation agrees exactly across engines**: Julia, C++, and CUDA produce identical final term counts (7494) and identical error (5.3e-2).
-- **Top-K beats weight truncation per term**: Rust's `max_terms = 4096` reaches 1.5e-4 error, while weight ≤ 4 keeps 7494 terms at 5.3e-2 — selecting terms by coefficient magnitude is far more efficient than selecting by operator locality on this circuit.
-- **Combining coeff + weight compresses 3.5x further** with no additional error (the weight cutoff dominates the error budget).
-- **GPU runtime is flat in term count at this scale** (~0.45 s regardless of threshold): kernel-launch overhead dominates below ~10⁵ terms, so the CUDA backend pays off only at larger scales.
-- **An interpreted propagation loop caps C++ gains**: swapping the Python fallback's arithmetic for the real C++ PauliEngine core cut runtime ~1.9x, but the per-gate loop still lives in Python — Julia and Rust win because their entire loop is compiled.
 
 ### 127-qubit LOWESA reproduction
 
@@ -127,7 +126,7 @@ configs/      benchmark specifications (TOML)
 src/          Julia orchestration layer + backend wrappers
 benchmarks/   executable entry points (run_backend.jl, run_sweep.jl)
 wrappers/     Rust / C++ / CUDA / Python runner implementations
-scripts/      comparison + validation tooling (Python)
+scripts/      comparison, validation, and demo-animation tooling (Python)
 docs/         per-backend notes, exchange-format spec, figures
 results/      generated outputs (not tracked)
 ```
