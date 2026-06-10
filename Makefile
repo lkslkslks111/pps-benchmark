@@ -169,6 +169,22 @@ test:
 		'@assert sweep_via_alias.task_id == "lowesa_tfi_127_l5_mz_sweep"' \
 		'@assert length(sweep_via_alias.results) == 3' \
 		'@assert isapprox(sweep_via_alias.results[1].expectation, surrogate_sweep.results[1].expectation; atol=1e-12)' \
+		'generic_spec = load_benchmark_spec("configs/sweep_medium.toml")' \
+		'@assert generic_spec.family == "clifford_pauli_rotation"' \
+		'generic_angles = generic_angle_grid(generic_spec)' \
+		'@assert length(generic_angles) == 21' \
+		'@assert isapprox(first(generic_angles), 0.0; atol=0.0, rtol=0.0)' \
+		'@assert isapprox(last(generic_angles), pi / 2; atol=1e-12)' \
+		'angle_desc = export_circuit_at_angle(generic_spec, 0.31)' \
+		'@assert all(isapprox(g.theta, 0.31; atol=0.0, rtol=0.0) for g in angle_desc.gates)' \
+		'@assert angle_desc.truncation["method"] == "threshold"' \
+		'generic_sweep = run_surrogate_sweep(backend, generic_spec; angle_indices=[1, 11, 21], max_freq=10, max_weight=4)' \
+		'@assert generic_sweep.success' \
+		'@assert length(generic_sweep.results) == 3' \
+		'@assert isapprox(generic_sweep.results[1].expectation, 1.0; atol=1e-10)' \
+		'@assert all(point -> isfinite(point.expectation), generic_sweep.results)' \
+		'@assert generic_sweep.metadata["sweep_rule"] == "correlated: every Pauli rotation = theta_h"' \
+		'@assert generic_sweep.metadata["num_paths_kept"] > 0' \
 		'println("temporary smoke tests passed")' \
 		> "$$tmp/runtests.jl"; \
 	PPS_TEST_TMP="$$tmp" $(JULIA) "$$tmp/runtests.jl"

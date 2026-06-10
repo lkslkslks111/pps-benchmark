@@ -1,0 +1,30 @@
+name = "sweep_medium"
+seed = 7
+
+# Generic correlated-angle sweep: every Pauli rotation in the 10-qubit
+# hardware-efficient circuit carries the same swept angle theta. The Julia
+# backend builds the frequency/weight-truncated surrogate once and evaluates
+# all angles on it; external backends re-propagate per angle using
+# external_coeff_threshold.
+
+[task]
+task_id = "medium_sweep_n10_l4_seed7"
+family = "clifford_pauli_rotation"
+nqubits = 10
+nlayers = 4
+observable = "Z0"
+
+[truncation]
+method = "lowesa_surrogate"
+max_freq = 30
+max_weight = 4
+external_coeff_threshold = 1.0e-7
+
+[reference]
+enabled = false
+
+[metadata]
+angle_start = 0.0
+angle_stop = 1.5707963267948966
+angle_count = 21
+sweep_rule = "correlated: every Pauli rotation = theta"

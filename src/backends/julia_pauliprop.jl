@@ -130,10 +130,15 @@ end
 """
     run_surrogate_sweep(backend, spec; angle_indices=nothing, max_freq=nothing, max_weight=nothing)
 
-Run the LOWESA surrogate benchmark for a `lowesa_tfi_127` spec. Builds the Pauli
-propagation surrogate once (the LOWESA path graph), then evaluates the magnetization /
-single-site expectation at every theta_h on the sweep grid. Reproduces Rudolph et al.
-2023, Fig. 2a.
+Build the Pauli propagation surrogate once (the path graph), then evaluate the
+observable expectation at every angle on the sweep grid. The frequency/weight
+truncations are parameter-independent, so the kept path set is identical at
+every angle — only the coefficients are re-evaluated per point.
+
+For `lowesa_tfi_127` this reproduces Rudolph et al. 2023 Fig. 2a (RX gates carry
+the swept theta_h, RZZ stay at -pi/2). For any other Clifford+PauliRotation
+family the sweep is fully correlated: every rotation angle equals theta_h, and
+the grid comes from `[metadata] angle_start/stop/count`.
 
 `angle_indices`, `max_freq`, `max_weight` override the config; used by the reduced
 `make test` smoke check.
@@ -145,8 +150,7 @@ function run_surrogate_sweep(
     max_freq=nothing,
     max_weight=nothing,
 )
-    spec.family == "lowesa_tfi_127" ||
-        throw(ArgumentError("run_surrogate_sweep requires family = lowesa_tfi_127"))
+    is_lowesa = spec.family == "lowesa_tfi_127"
 
     circuit, _, _ = _export_task_components(spec)
     observable = _parse_observable(spec.nqubits, spec.observable)
@@ -156,10 +160,10 @@ function run_surrogate_sweep(
     ℓ > 0 || throw(ArgumentError("max_freq must be positive"))
     weight > 0 || throw(ArgumentError("max_weight must be positive"))
 
-    angles = lowesa_angle_grid(spec)
+    angles = is_lowesa ? lowesa_angle_grid(spec) : generic_angle_grid(spec)
     selected = isnothing(angle_indices) ? collect(eachindex(angles)) : collect(angle_indices)
 
-    has_reference = Bool(get(spec.reference, "enabled", false))
+    has_reference = is_lowesa && Bool(get(spec.reference, "enabled", false))
     reference_values = if has_reference
         ref_thetas, ref_values = lowesa_reference_curve(spec)
         length(ref_values) == length(angles) ||
@@ -169,11 +173,12 @@ function run_surrogate_sweep(
         Float64[]
     end
 
-    # RX parameters carry the swept field theta_h; RZZ parameters are fixed at -pi/2.
-    is_rx = [gate.symbols == [:X] for gate in circuit]
+    # LOWESA: RX parameters carry the swept theta_h, RZZ stay fixed at -pi/2.
+    # Generic: every parametrized rotation carries theta_h.
     nparams = countparameters(circuit)
-    length(is_rx) == nparams ||
-        throw(ArgumentError("parameter mask length $(length(is_rx)) != countparameters $nparams"))
+    is_swept = is_lowesa ? [gate.symbols == [:X] for gate in circuit] : fill(true, nparams)
+    length(is_swept) == nparams ||
+        throw(ArgumentError("parameter mask length $(length(is_swept)) != countparameters $nparams"))
 
     # --- Build the surrogate once (the LOWESA path graph). ---
     obs_psum = observable isa PauliSum ? observable : PauliSum(observable)
@@ -198,13 +203,13 @@ function run_surrogate_sweep(
         1 <= angle_index <= length(angles) ||
             throw(ArgumentError("angle index $angle_index is outside 1:$(length(angles))"))
         angle = Float64(angles[angle_index])
-        thetas = [is_rx[i] ? angle : -pi / 2 for i in 1:nparams]
+        thetas = [is_swept[i] ? angle : -pi / 2 for i in 1:nparams]
 
         evaluated = @timed evaluate!(surrogate, thetas)
         expectation = Float64(real(overlapwithzero(surrogate)))
 
-        reference = has_reference ? Float64(reference_values[angle_index]) : NaN
-        absolute_error = has_reference ? abs(expectation - reference) : NaN
+        reference = has_reference ? Float64(reference_values[angle_index]) : nothing
+        absolute_error = has_reference ? abs(expectation - reference) : nothing
         if has_reference
             squared_error_sum += absolute_error^2
             error_count += 1
@@ -227,7 +232,7 @@ function run_surrogate_sweep(
         )
     end
     eval_time_sec = Float64(time_ns() - eval_start) / 1.0e9
-    rmse = error_count > 0 ? sqrt(squared_error_sum / error_count) : NaN
+    rmse = error_count > 0 ? sqrt(squared_error_sum / error_count) : nothing
 
     metadata = copy(spec.metadata)
     merge!(
@@ -237,7 +242,8 @@ function run_surrogate_sweep(
             "nqubits" => spec.nqubits,
             "nlayers" => spec.nlayers,
             "observable" => spec.observable,
-            "topology" => "ibm_eagle",
+            "sweep_rule" => is_lowesa ? "lowesa: RX = theta_h, RZZ = -pi/2" :
+                            "correlated: every Pauli rotation = theta_h",
             "angle_start" => first(angles),
             "angle_stop" => last(angles),
             "angle_count" => length(angles),
@@ -257,10 +263,13 @@ function run_surrogate_sweep(
             "rmse" => rmse,
             "reference_enabled" => has_reference,
             "reference_file" => String(get(spec.reference, "file", "")),
-            "reference_arxiv" => "https://arxiv.org/abs/2308.09109",
-            "reference_code" => "https://github.com/MSRudolph/PauliPropagation.jl",
         ),
     )
+    if is_lowesa
+        metadata["topology"] = "ibm_eagle"
+        metadata["reference_arxiv"] = "https://arxiv.org/abs/2308.09109"
+        metadata["reference_code"] = "https://github.com/MSRudolph/PauliPropagation.jl"
+    end
 
     return BenchmarkSweepResult(
         backend_name(backend),
@@ -449,8 +458,8 @@ function _run_pauliprop_sweep_point(
         Int(med.memory),
         length(threshold_result.terms),
         expectation,
-        NaN,
-        NaN,
+        nothing,
+        nothing,
         metadata,
     )
 end
