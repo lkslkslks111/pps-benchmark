@@ -45,10 +45,13 @@ function main(args)
     parsed = _parse_args(args)
     backend = _make_backend(parsed["backend"])
     spec = load_benchmark_spec(parsed["config"])
-    result = if spec.family == "lowesa_tfi_127"
-        run_backend_sweep(backend, spec)
-    else
+    # rudolph_eagle_127 keeps its dedicated per-angle propagate path; every
+    # other family goes through run_backend_sweep (Julia: surrogate built once,
+    # evaluated per angle; external backends: full re-propagation per angle).
+    result = if spec.family == "rudolph_eagle_127"
         run_sweep(backend, spec)
+    else
+        run_backend_sweep(backend, spec)
     end
     println(JSON3.write(benchmark_sweep_result_dict(result)))
     return 0

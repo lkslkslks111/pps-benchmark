@@ -44,8 +44,10 @@ struct BenchmarkSweepPoint
     memory_bytes::Int
     final_terms::Int
     expectation::Float64
-    reference::Float64
-    absolute_error::Float64
+    # `nothing` when the sweep has no reference curve (JSON null; NaN is not
+    # representable in spec-compliant JSON).
+    reference::Union{Float64,Nothing}
+    absolute_error::Union{Float64,Nothing}
     metadata::Dict{String,Any}
 end
 
@@ -376,12 +378,30 @@ function lowesa_angle_grid(spec::BenchmarkSpec)
     return collect(LinRange(0.0, pi / 2, count))
 end
 
+"""
+    generic_angle_grid(spec::BenchmarkSpec)
+
+Correlated-sweep angle grid for any family, read from `[metadata]`
+`angle_start` / `angle_stop` / `angle_count` (defaults 0 .. pi/2, 21 points).
+"""
+function generic_angle_grid(spec::BenchmarkSpec)
+    start = Float64(get(spec.metadata, "angle_start", 0.0))
+    stop = Float64(get(spec.metadata, "angle_stop", pi / 2))
+    count = Int(get(spec.metadata, "angle_count", 21))
+    count > 1 || throw(ArgumentError("angle_count must be greater than 1"))
+    return collect(LinRange(start, stop, count))
+end
+
 function export_circuit_at_angle(spec::BenchmarkSpec, theta_h::Float64)
-    spec.family == "lowesa_tfi_127" ||
-        throw(ArgumentError("export_circuit_at_angle requires family = lowesa_tfi_127"))
     desc = export_circuit(spec)
-    gates = map(desc.gates) do gate
-        gate.paulis == ["X"] ? CircuitGate(gate.type, gate.paulis, gate.qubits, theta_h) : gate
+    gates = if spec.family == "lowesa_tfi_127"
+        # LOWESA rule: RX gates carry the swept field theta_h, RZZ stay frozen.
+        map(desc.gates) do gate
+            gate.paulis == ["X"] ? CircuitGate(gate.type, gate.paulis, gate.qubits, theta_h) : gate
+        end
+    else
+        # Generic correlated sweep: every Pauli rotation carries theta_h.
+        map(g -> CircuitGate(g.type, g.paulis, g.qubits, theta_h), desc.gates)
     end
     # External backends (rust/cpp/cuda) do exact Pauli propagation with a
     # coefficient-threshold truncation, not the Julia-only `lowesa_surrogate`
