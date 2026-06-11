@@ -1,0 +1,34 @@
+name = "lowesa_tfi_127_L5_mz_ext_thr1e-6_40pt"
+seed = 20230501
+
+[task]
+task_id = "lowesa_tfi_127_l5_mz_ext_thr1e-6_40pt"
+family = "lowesa_tfi_127"
+nqubits = 127
+nlayers = 5
+observable = "Mz"
+
+[truncation]
+method = "lowesa_surrogate"
+max_freq = 40
+max_weight = 8
+# Truncation-grid point: coefficient cutoff for the EXTERNAL backends
+# (rust/cpp/cuda). The Julia surrogate ignores this key.
+external_coeff_threshold = 1.0e-6
+
+[reference]
+enabled = true
+method = "ibm_utility_exact"
+# 40-point downsampled curve: the angle grid is taken from this file, so the
+# sweep runs 40 angles instead of the full 158 (see lowesa_angle_grid).
+file = "reference/ibm_utility_L5_Mz_40pt.txt"
+
+[metadata]
+topology = "ibm_eagle"
+angle_start = 0.0
+angle_stop = 1.5707963267948966
+angle_count = 40
+reference_paper = "Kim et al., Evidence for the utility of quantum computing before fault tolerance, Nature 618, 500-505 (2023)"
+reference_arxiv = "https://arxiv.org/abs/2308.09109"
+lowesa_paper = "Rudolph et al. 2023, Classical Surrogate Simulation of Quantum Systems with LOWESA"
+comparison_note = "Truncation-grid point (issue #40): 40-angle coarse sweep, external coefficient threshold 1e-6."
