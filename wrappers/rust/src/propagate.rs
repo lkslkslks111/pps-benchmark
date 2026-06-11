@@ -52,11 +52,10 @@ pub fn propagate(
 ) -> Result<PropagationOutcome, String> {
     let threshold = circuit::truncation_threshold(description)?;
     let max_terms = circuit::truncation_max_terms(description)?;
-    let (symbol, index) =
-        circuit::parse_observable(&description.observable, description.nqubits)?;
+    let terms = circuit::parse_observable_terms(&description.observable, description.nqubits)?;
 
     Python::with_gil(|py| {
-        run_in_py(py, description, samples, threshold, max_terms, symbol, index)
+        run_in_py(py, description, samples, threshold, max_terms, &terms)
             .map_err(|e| format!("pauli_prop propagation failed: {e}"))
     })
 }
@@ -67,8 +66,7 @@ fn run_in_py(
     samples: usize,
     threshold: f64,
     max_terms: Option<i64>,
-    symbol: char,
-    index: i64,
+    terms: &[(char, i64, f64)],
 ) -> PyResult<PropagationOutcome> {
     let qc = build_circuit(py, description)?;
     let pauli_prop = py.import_bound("pauli_prop")?;
@@ -80,7 +78,7 @@ fn run_in_py(
     let mut durations: Vec<f64> = Vec::with_capacity(samples);
     let mut last = None;
     for _ in 0..samples {
-        let observable = build_observable(py, symbol, index, description.nqubits)?;
+        let observable = build_observable(py, terms, description.nqubits)?;
         let started = Instant::now();
         let tuple = propagate_fn.call(
             (observable, qc.clone()),
@@ -130,17 +128,20 @@ fn propagation_kwargs(
     Ok(kwargs)
 }
 
-/// Build the single-term observable as a `qiskit` `SparsePauliOp`.
+/// Build the observable as a `qiskit` `SparsePauliOp` from its
+/// `(pauli, qubit, coeff)` terms.
 fn build_observable<'py>(
     py: Python<'py>,
-    symbol: char,
-    index: i64,
+    terms: &[(char, i64, f64)],
     nqubits: i64,
 ) -> PyResult<Bound<'py, PyAny>> {
     let quantum_info = py.import_bound("qiskit.quantum_info")?;
     let kwargs = PyDict::new_bound(py);
     kwargs.set_item("num_qubits", nqubits)?;
-    let sparse_list = vec![(symbol.to_string(), vec![index], 1.0_f64)];
+    let sparse_list: Vec<(String, Vec<i64>, f64)> = terms
+        .iter()
+        .map(|&(symbol, index, coeff)| (symbol.to_string(), vec![index], coeff))
+        .collect();
     quantum_info
         .getattr("SparsePauliOp")?
         .call_method("from_sparse_list", (sparse_list,), Some(&kwargs))
