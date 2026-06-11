@@ -6,6 +6,7 @@ JULIA = julia --project=.
 	build-cuda smoke-cuda test-cuda smoke-lowesa-127-cuda benchmark-lowesa-127-cuda \
 	build-cpp smoke-cpp test-cpp smoke-lowesa-127-cpp benchmark-lowesa-127-cpp \
 	benchmark-lowesa-127-all \
+	benchmark-trunc-grid-julia benchmark-trunc-grid-rust benchmark-trunc-grid-cpp benchmark-trunc-grid-cuda \
 	remote-submit remote-collect remote-validate
 
 instantiate:
@@ -494,6 +495,42 @@ benchmark-lowesa-127-cuda: build-cuda
 	@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend cuda_cupauliprop --config configs/lowesa_tfi_127_L5_z62.toml > results/tmp/cuda_lowesa_tfi_127_L5_z62.json && mv results/tmp/cuda_lowesa_tfi_127_L5_z62.json results/cuda_lowesa_tfi_127_L5_z62.json
 
 benchmark-lowesa-127-all: benchmark-lowesa-127 benchmark-lowesa-127-rust benchmark-lowesa-127-cpp benchmark-lowesa-127-cuda benchmark-lowesa-127-cuquantum
+
+# ── Truncation-grid campaign (issue #40) ─────────────────────────────────────
+# 4 backends × truncation combos on the 127-qubit LOWESA L=5 Mz sweep.
+# Grid points run 40 angles (downsampled reference file); the strictest combo
+# per backend also runs the full 158-angle sweep. Combos run loosest → strictest
+# and each line is `-` prefixed so one failure (e.g. OOM) does not abort the
+# remaining combos — check for missing output files in $(TRUNC_GRID_DIR).
+
+TRUNC_GRID_DIR = results/trunc_grid
+
+benchmark-trunc-grid-julia:
+	@mkdir -p $(TRUNC_GRID_DIR) results/tmp
+	-@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend julia_pauliprop --config configs/lowesa_tfi_127_L5_mz_julia_f30w6_40pt.toml > results/tmp/julia_f30w6_40pt.json && mv results/tmp/julia_f30w6_40pt.json $(TRUNC_GRID_DIR)/julia_f30w6_40pt.json
+	-@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend julia_pauliprop --config configs/lowesa_tfi_127_L5_mz_julia_f40w8_40pt.toml > results/tmp/julia_f40w8_40pt.json && mv results/tmp/julia_f40w8_40pt.json $(TRUNC_GRID_DIR)/julia_f40w8_40pt.json
+	-@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend julia_pauliprop --config configs/lowesa_tfi_127_L5_mz.toml > results/tmp/julia_f40w8_158pt.json && mv results/tmp/julia_f40w8_158pt.json $(TRUNC_GRID_DIR)/julia_f40w8_158pt.json
+
+benchmark-trunc-grid-rust: build-rust
+	@mkdir -p $(TRUNC_GRID_DIR) results/tmp
+	-@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend rust_pauliprop --config configs/lowesa_tfi_127_L5_mz_ext_thr1e-5_40pt.toml > results/tmp/rust_thr1e-5_40pt.json && mv results/tmp/rust_thr1e-5_40pt.json $(TRUNC_GRID_DIR)/rust_thr1e-5_40pt.json
+	-@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend rust_pauliprop --config configs/lowesa_tfi_127_L5_mz_ext_thr1e-6_40pt.toml > results/tmp/rust_thr1e-6_40pt.json && mv results/tmp/rust_thr1e-6_40pt.json $(TRUNC_GRID_DIR)/rust_thr1e-6_40pt.json
+	-@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend rust_pauliprop --config configs/lowesa_tfi_127_L5_mz_ext_thr1e-7_40pt.toml > results/tmp/rust_thr1e-7_40pt.json && mv results/tmp/rust_thr1e-7_40pt.json $(TRUNC_GRID_DIR)/rust_thr1e-7_40pt.json
+	-@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend rust_pauliprop --config configs/lowesa_tfi_127_L5_mz_ext_thr1e-7.toml > results/tmp/rust_thr1e-7_158pt.json && mv results/tmp/rust_thr1e-7_158pt.json $(TRUNC_GRID_DIR)/rust_thr1e-7_158pt.json
+
+benchmark-trunc-grid-cpp: build-cpp
+	@mkdir -p $(TRUNC_GRID_DIR) results/tmp
+	-@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend cpp_pauliengine --config configs/lowesa_tfi_127_L5_mz_ext_thr1e-5_40pt.toml > results/tmp/cpp_thr1e-5_40pt.json && mv results/tmp/cpp_thr1e-5_40pt.json $(TRUNC_GRID_DIR)/cpp_thr1e-5_40pt.json
+	-@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend cpp_pauliengine --config configs/lowesa_tfi_127_L5_mz_ext_thr1e-6_40pt.toml > results/tmp/cpp_thr1e-6_40pt.json && mv results/tmp/cpp_thr1e-6_40pt.json $(TRUNC_GRID_DIR)/cpp_thr1e-6_40pt.json
+	-@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend cpp_pauliengine --config configs/lowesa_tfi_127_L5_mz_ext_thr1e-7_40pt.toml > results/tmp/cpp_thr1e-7_40pt.json && mv results/tmp/cpp_thr1e-7_40pt.json $(TRUNC_GRID_DIR)/cpp_thr1e-7_40pt.json
+	-@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend cpp_pauliengine --config configs/lowesa_tfi_127_L5_mz_ext_thr1e-7.toml > results/tmp/cpp_thr1e-7_158pt.json && mv results/tmp/cpp_thr1e-7_158pt.json $(TRUNC_GRID_DIR)/cpp_thr1e-7_158pt.json
+
+benchmark-trunc-grid-cuda: build-cuda
+	@mkdir -p $(TRUNC_GRID_DIR) results/tmp
+	-@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend cuda_cupauliprop --config configs/lowesa_tfi_127_L5_mz_ext_thr1e-5_40pt.toml > results/tmp/cuda_thr1e-5_40pt.json && mv results/tmp/cuda_thr1e-5_40pt.json $(TRUNC_GRID_DIR)/cuda_thr1e-5_40pt.json
+	-@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend cuda_cupauliprop --config configs/lowesa_tfi_127_L5_mz_ext_thr1e-6_40pt.toml > results/tmp/cuda_thr1e-6_40pt.json && mv results/tmp/cuda_thr1e-6_40pt.json $(TRUNC_GRID_DIR)/cuda_thr1e-6_40pt.json
+	-@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend cuda_cupauliprop --config configs/lowesa_tfi_127_L5_mz_ext_thr1e-7_40pt.toml > results/tmp/cuda_thr1e-7_40pt.json && mv results/tmp/cuda_thr1e-7_40pt.json $(TRUNC_GRID_DIR)/cuda_thr1e-7_40pt.json
+	-@JULIA_PKG_PRECOMPILE_AUTO=0 $(JULIA) benchmarks/run_sweep.jl --backend cuda_cupauliprop --config configs/lowesa_tfi_127_L5_mz_ext_thr1e-7.toml > results/tmp/cuda_thr1e-7_158pt.json && mv results/tmp/cuda_thr1e-7_158pt.json $(TRUNC_GRID_DIR)/cuda_thr1e-7_158pt.json
 
 clean:
 	rm -rf results/tmp/*

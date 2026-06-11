@@ -1,0 +1,33 @@
+name = "lowesa_tfi_127_L5_mz_ext_thr1e-7"
+seed = 20230501
+
+[task]
+task_id = "lowesa_tfi_127_l5_mz_ext_thr1e-7"
+family = "lowesa_tfi_127"
+nqubits = 127
+nlayers = 5
+observable = "Mz"
+
+[truncation]
+method = "lowesa_surrogate"
+max_freq = 40
+max_weight = 8
+# Full-resolution truncation-grid point: strictest grid threshold for the
+# EXTERNAL backends (rust/cpp/cuda) at the production 158-angle sweep.
+# The Julia surrogate ignores this key.
+external_coeff_threshold = 1.0e-7
+
+[reference]
+enabled = true
+method = "ibm_utility_exact"
+file = "reference/ibm_utility_L5_Mz.txt"
+
+[metadata]
+topology = "ibm_eagle"
+angle_start = 0.0
+angle_stop = 1.5707963267948966
+angle_count = 158
+reference_paper = "Kim et al., Evidence for the utility of quantum computing before fault tolerance, Nature 618, 500-505 (2023)"
+reference_arxiv = "https://arxiv.org/abs/2308.09109"
+lowesa_paper = "Rudolph et al. 2023, Classical Surrogate Simulation of Quantum Systems with LOWESA"
+comparison_note = "Truncation-grid point (issue #40): full 158-angle sweep, external coefficient threshold 1e-7."
