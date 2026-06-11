@@ -124,6 +124,23 @@ pub fn truncation_max_terms(description: &CircuitDescription) -> Result<Option<i
     }
 }
 
+/// Parse an observable label into a list of `(pauli, qubit, coeff)` terms.
+/// `"Mz"` / `"magnetization"` expands to `sum_i Z_i / nqubits`, matching the
+/// cpp/cuda runners and the Julia backend; anything else must be a
+/// single-qubit Pauli label such as `"Z62"`.
+pub fn parse_observable_terms(
+    observable: &str,
+    nqubits: i64,
+) -> Result<Vec<(char, i64, f64)>, String> {
+    let obs = observable.trim();
+    if obs == "Mz" || obs == "magnetization" {
+        let coeff = 1.0 / nqubits as f64;
+        return Ok((0..nqubits).map(|qubit| ('Z', qubit, coeff)).collect());
+    }
+    let (symbol, index) = parse_observable(obs, nqubits)?;
+    Ok(vec![(symbol, index, 1.0)])
+}
+
 /// Parse a single-qubit observable label such as `"Z0"` into its Pauli symbol
 /// and 0-based qubit index. Mirrors `_parse_observable` in `julia_pauliprop.jl`.
 pub fn parse_observable(observable: &str, nqubits: i64) -> Result<(char, i64), String> {
@@ -225,6 +242,18 @@ mod tests {
     fn parses_a_single_qubit_observable() {
         assert_eq!(parse_observable("Z0", 4).unwrap(), ('Z', 0));
         assert_eq!(parse_observable("X3", 4).unwrap(), ('X', 3));
+    }
+
+    #[test]
+    fn expands_mz_into_per_qubit_z_terms() {
+        let terms = parse_observable_terms("Mz", 4).unwrap();
+        assert_eq!(terms, vec![('Z', 0, 0.25), ('Z', 1, 0.25), ('Z', 2, 0.25), ('Z', 3, 0.25)]);
+        assert_eq!(parse_observable_terms("magnetization", 4).unwrap(), terms);
+    }
+
+    #[test]
+    fn wraps_a_single_qubit_observable_into_one_term() {
+        assert_eq!(parse_observable_terms("Z2", 4).unwrap(), vec![('Z', 2, 1.0)]);
     }
 
     #[test]
